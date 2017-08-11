@@ -1,0 +1,8 @@
+[package]
+name = "statechart"
+description = "statecharts: hierarchical, reactive state machines"
+license = "MIT"
+version = "0.0.0"
+authors = ["Casey Marshall <github@cmars.tech>"]
+
+[dependencies]
