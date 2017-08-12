@@ -1,269 +1,169 @@
+#[macro_use]
+extern crate derive_builder;
 
 use std::collections::HashMap;
 use std::io::Error;
-use std::marker::Sized;
-use std::ops::{Deref, DerefMut};
 
-pub type StateID = String;
+pub type StateID = Vec<usize>;
 
-pub type StateRef = String;
+pub type StateLabel = String;
 
-pub trait State: std::fmt::Debug {
-    fn id(&self) -> &StateID;
-    fn substate(&self, id: &str) -> Option<&State>;
-}
-
-pub trait StateBuilder {
-    fn mut_on_entry(&mut self) -> &mut Vec<Box<Action>>;
-    fn mut_on_exit(&mut self) -> &mut Vec<Box<Action>>;
-    fn push_on_entry(mut self, a: Box<Action>) -> Self
-        where Self: Sized
-    {
-        self.mut_on_entry().push(a);
-        self
-    }
-    fn push_on_exit(mut self, a: Box<Action>) -> Self
-        where Self: Sized
-    {
-        self.mut_on_exit().push(a);
-        self
-    }
-}
-
-pub trait InterimStateBuilder {
-    fn mut_transitions(&mut self) -> &mut Vec<Transition>;
-    fn push_transition(mut self, t: Transition) -> Self
-        where Self: Sized
-    {
-        self.mut_transitions().push(t);
-        self
-    }
-}
-
-pub trait ParentStateBuilder {
-    fn mut_substate(&mut self, id: &str) -> Option<&mut State> {
-        let ss = self.mut_substates();
-        for i in {
-            0..ss.len()
-        } {
-            if ss[i].id() == id {
-                return match ss.get_mut(i) {
-                    Some(s) => {
-                        let mut sr: &mut State = s.deref_mut();
-                        Some(sr)
-                    }
-                    None => None,
-                };
-            }
-        }
-        None
-    }
-    fn mut_substates(&mut self) -> &mut Vec<Box<State>>;
-    fn push_substate(mut self, s: Box<State>) -> Self
-        where Self: Sized
-    {
-        self.mut_substates().push(s);
-        self
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone, Builder)]
 pub struct Atomic {
+    #[builder(default="vec![]")]
     id: StateID,
-    on_entry: Vec<Box<Action>>,
-    on_exit: Vec<Box<Action>>,
+    #[builder(setter(into))]
+    label: StateLabel,
+    #[builder(default="vec![]")]
+    on_entry: Vec<Action>,
+    #[builder(default="vec![]")]
+    on_exit: Vec<Action>,
+    #[builder(default="vec![]")]
     transitions: Vec<Transition>,
 }
 
-impl State for Atomic {
-    fn id(&self) -> &StateID {
-        &self.id
-    }
-    fn substate(&self, _: &str) -> Option<&State> {
-        None
-    }
+#[derive(Debug, PartialEq, Clone, Builder)]
+pub struct Compound {
+    #[builder(default="vec![]")]
+    id: StateID,
+    #[builder(setter(into))]
+    label: StateLabel,
+    #[builder(default="None")]
+    initial_label: Option<StateLabel>,
+    #[builder(default="vec![]")]
+    on_entry: Vec<Action>,
+    #[builder(default="vec![]")]
+    on_exit: Vec<Action>,
+    #[builder(default="vec![]")]
+    transitions: Vec<Transition>,
+    #[builder(default="vec![]")]
+    substates: Vec<State>,
 }
 
-impl StateBuilder for Atomic {
-    fn mut_on_entry(&mut self) -> &mut Vec<Box<Action>> {
-        &mut self.on_entry
-    }
-    fn mut_on_exit(&mut self) -> &mut Vec<Box<Action>> {
-        &mut self.on_exit
-    }
+#[derive(Debug, PartialEq, Clone, Builder)]
+pub struct Parallel {
+    #[builder(default="vec![]")]
+    id: StateID,
+    #[builder(setter(into))]
+    label: StateLabel,
+    #[builder(default="vec![]")]
+    on_entry: Vec<Action>,
+    #[builder(default="vec![]")]
+    on_exit: Vec<Action>,
+    #[builder(default="vec![]")]
+    transitions: Vec<Transition>,
+    #[builder(default="vec![]")]
+    substates: Vec<State>,
 }
 
-impl InterimStateBuilder for Atomic {
-    fn mut_transitions(&mut self) -> &mut Vec<Transition> {
-        &mut self.transitions
-    }
+#[derive(Debug, PartialEq, Clone, Builder)]
+pub struct Final {
+    #[builder(default="vec![]")]
+    id: StateID,
+    #[builder(setter(into))]
+    label: StateLabel,
+    #[builder(default="vec![]")]
+    on_entry: Vec<Action>,
+    #[builder(default="vec![]")]
+    on_exit: Vec<Action>,
+    #[builder(default="Output::Empty(Empty)")]
+    result: Output,
 }
 
-impl Atomic {
-    pub fn new(id: &str) -> Atomic {
-        Atomic {
-            id: id.to_string(),
-            on_entry: vec![],
-            on_exit: vec![],
-            transitions: vec![],
+#[derive(Debug, PartialEq, Clone)]
+pub enum State {
+    Atomic(Atomic),
+    Compound(Compound),
+    Parallel(Parallel),
+    Final(Final),
+}
+
+impl State {
+    pub fn id(&self) -> &StateID {
+        match self {
+            &State::Atomic(ref a) => &a.id,
+            &State::Compound(ref c) => &c.id,
+            &State::Parallel(ref p) => &p.id,
+            &State::Final(ref f) => &f.id,
         }
     }
-}
-
-#[derive(Debug)]
-pub struct Compound {
-    id: StateID,
-    initial_id: Option<StateID>,
-    on_entry: Vec<Box<Action>>,
-    on_exit: Vec<Box<Action>>,
-    transitions: Vec<Transition>,
-    substates: Vec<Box<State>>,
-}
-
-impl State for Compound {
-    fn id(&self) -> &StateID {
-        &self.id
+    pub fn label(&self) -> &StateLabel {
+        match self {
+            &State::Atomic(ref a) => &a.label,
+            &State::Compound(ref c) => &c.label,
+            &State::Parallel(ref p) => &p.label,
+            &State::Final(ref f) => &f.label,
+        }
     }
-    fn substate(&self, id: &str) -> Option<&State> {
-        for i in {
-            0..self.substates.len()
-        } {
-            if self.substates[i].id() == id {
-                return match self.substates.get(i) {
-                    Some(s) => {
-                        let sr: &State = s.deref();
-                        Some(sr)
-                    }
-                    None => None,
-                };
+    pub fn substate(&self, label: &str) -> Option<&State> {
+        let ss = match self {
+            &State::Atomic(ref a) => return None,
+            &State::Compound(ref c) => &c.substates,
+            &State::Parallel(ref p) => &p.substates,
+            &State::Final(ref f) => return None,
+        };
+        for i in 0..ss.len() {
+            if ss[i].label() == label {
+                return Some(&ss[i]);
             }
         }
         None
     }
-}
-
-impl StateBuilder for Compound {
-    fn mut_on_entry(&mut self) -> &mut Vec<Box<Action>> {
-        &mut self.on_entry
+    fn mut_substates(&mut self) -> Option<&mut Vec<State>> {
+        match self {
+            &mut State::Atomic(ref mut a) => None,
+            &mut State::Compound(ref mut c) => Some(&mut c.substates),
+            &mut State::Parallel(ref mut p) => Some(&mut p.substates),
+            &mut State::Final(ref mut f) => None,
+        }
     }
-    fn mut_on_exit(&mut self) -> &mut Vec<Box<Action>> {
-        &mut self.on_exit
+    pub fn set_root(&mut self) {
+        self.set_id(vec![0]);
     }
-}
-
-impl InterimStateBuilder for Compound {
-    fn mut_transitions(&mut self) -> &mut Vec<Transition> {
-        &mut self.transitions
+    fn set_id(&mut self, new_id: StateID) {
+        let id = {
+            match self {
+                &mut State::Atomic(ref mut a) => {
+                    a.id = new_id;
+                    return;
+                }
+                &mut State::Compound(ref mut c) => c.id = new_id.clone(),
+                &mut State::Parallel(ref mut p) => p.id = new_id.clone(),
+                &mut State::Final(ref mut f) => {
+                    f.id = new_id;
+                    return;
+                }
+            }
+        };
+        match self.mut_substates() {
+            Some(ref mut ss) => {
+                for i in 0..ss.len() {
+                    let mut child_id = new_id.clone();
+                    child_id.push(i);
+                    ss[i].set_id(child_id);
+                }
+            }
+            None => {}
+        }
     }
-}
-
-impl ParentStateBuilder for Compound {
-    fn mut_substates(&mut self) -> &mut Vec<Box<State>> {
-        &mut self.substates
-    }
-}
-
-impl Compound {
-    pub fn new(id: &str) -> Compound {
-        Compound {
-            id: id.to_string(),
-            initial_id: None,
-            on_entry: vec![],
-            on_exit: vec![],
-            transitions: vec![],
-            substates: vec![],
+    fn prepend_id(parent: &StateID, target: &mut StateID) {
+        for i in parent.len() - 1..0 {
+            target.insert(0, parent[i]);
         }
     }
 }
 
 #[derive(Debug)]
-pub struct Parallel {
-    id: StateID,
-    on_entry: Vec<Box<Action>>,
-    on_exit: Vec<Box<Action>>,
-    transitions: Vec<Transition>,
-    substates: Vec<Box<State>>,
-}
-
-impl StateBuilder for Parallel {
-    fn mut_on_entry(&mut self) -> &mut Vec<Box<Action>> {
-        &mut self.on_entry
-    }
-    fn mut_on_exit(&mut self) -> &mut Vec<Box<Action>> {
-        &mut self.on_exit
-    }
-}
-
-impl InterimStateBuilder for Parallel {
-    fn mut_transitions(&mut self) -> &mut Vec<Transition> {
-        &mut self.transitions
-    }
-}
-
-impl ParentStateBuilder for Parallel {
-    fn mut_substates(&mut self) -> &mut Vec<Box<State>> {
-        &mut self.substates
-    }
-}
-
-impl Parallel {
-    pub fn new(id: &str) -> Parallel {
-        Parallel {
-            id: id.to_string(),
-            on_entry: vec![],
-            on_exit: vec![],
-            transitions: vec![],
-            substates: vec![],
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct Final {
-    id: StateID,
-    on_entry: Vec<Box<Action>>,
-    on_exit: Vec<Box<Action>>,
-    result: Box<Output>,
-}
-
-impl State for Final {
-    fn id(&self) -> &StateID {
-        &self.id
-    }
-    fn substate(&self, _: &str) -> Option<&State> {
-        None
-    }
-}
-
-impl StateBuilder for Final {
-    fn mut_on_entry(&mut self) -> &mut Vec<Box<Action>> {
-        &mut self.on_entry
-    }
-    fn mut_on_exit(&mut self) -> &mut Vec<Box<Action>> {
-        &mut self.on_exit
-    }
-}
-
-impl Final {
-    pub fn new(id: &str) -> Final {
-        Final {
-            id: id.to_string(),
-            on_entry: vec![],
-            on_exit: vec![],
-            result: Box::new(EmptyResult),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct Context<'a> {
-    root: &'a State,
+pub struct Context {
+    root: State,
     vars: Object,
     events: Vec<Event>,
 }
 
-impl<'a> Context<'a> {
-    pub fn new(root: &'a State) -> Context<'a> {
+impl Context {
+    pub fn new(root: State) -> Context {
+        let mut root = root;
+        root.set_root();
         Context {
             root: root,
             vars: Object::new(),
@@ -272,49 +172,116 @@ impl<'a> Context<'a> {
     }
 }
 
-pub trait Action: std::fmt::Debug {
+pub trait Actionable {
     fn apply(&self, &mut Context) -> Result<(), Error>;
 }
 
-pub trait Condition: std::fmt::Debug {
-    fn eval(&self, &Context) -> bool;
+#[derive(Debug, PartialEq, Clone, Builder)]
+pub struct Log {
+    #[builder(default, setter(into))]
+    label: String,
+    #[builder(default, setter(into))]
+    message: String,
 }
 
-pub trait Output: std::fmt::Debug {
-    fn eval(&self, &Context) -> Value;
-}
-
-#[derive(Debug)]
-pub struct Log(pub String);
-
-impl Action for Log {
+impl Actionable for Log {
     fn apply(&self, _: &mut Context) -> Result<(), Error> {
-        println!("{}", self.0);
+        println!("[{:?}]{}: {}",
+                 std::time::SystemTime::now(),
+                 self.label,
+                 self.message);
         Ok(())
     }
 }
 
-#[derive(Debug)]
-struct EmptyResult;
+#[derive(Debug, PartialEq, Clone, Builder)]
+pub struct Send {
+    #[builder(setter(into))]
+    topic: String,
+    #[builder(default="Value::Object(HashMap::new())")]
+    contents: Value,
+}
 
-impl Output for EmptyResult {
-    fn eval(&self, _: &Context) -> Value {
-        Value::Object(HashMap::new())
+impl Actionable for Send {
+    fn apply(&self, ctx: &mut Context) -> Result<(), Error> {
+        ctx.events.push(Event {
+            topic: self.topic.clone(),
+            contents: self.contents.clone(),
+        });
+        Ok(())
     }
 }
 
-#[derive(Debug)]
-struct True;
+#[derive(Debug, PartialEq, Clone)]
+pub enum Action {
+    Log(Log),
+    Send(Send),
+}
 
-impl Condition for True {
+impl Action {
+    fn actionable(&self) -> &Actionable {
+        match self {
+            &Action::Log(ref a) => a,
+            &Action::Send(ref s) => s,
+        }
+    }
+}
+
+pub trait Conditional {
+    fn eval(&self, &Context) -> bool;
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct True;
+
+impl Conditional for True {
     fn eval(&self, _: &Context) -> bool {
         true
     }
 }
 
+#[derive(Debug, PartialEq, Clone)]
+pub enum Condition {
+    True(True),
+}
+
+impl Condition {
+    fn conditional(&self) -> &Conditional {
+        match self {
+            &Condition::True(ref c) => c,
+        }
+    }
+}
+
+pub trait Outputable {
+    fn eval(&self, &Context) -> Value;
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct Empty;
+
+impl Outputable for Empty {
+    fn eval(&self, _: &Context) -> Value {
+        Value::Object(HashMap::new())
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum Output {
+    Empty(Empty),
+}
+
+impl Output {
+    fn outputable(&self) -> &Outputable {
+        match self {
+            &Output::Empty(ref o) => o,
+        }
+    }
+}
+
 pub type Object = HashMap<String, Value>;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Value {
     Bool(bool),
     Int(i32),
@@ -323,43 +290,20 @@ pub enum Value {
     Object(HashMap<String, Value>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Event {
     topic: String,
     contents: Value,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone, Builder)]
 pub struct Transition {
+    #[builder(default="vec![]")]
     topics: Vec<String>,
-    cond: Box<Condition>,
-    actions: Vec<Box<Action>>,
-    target_id: Option<StateID>,
-}
-
-impl Transition {
-    pub fn new() -> Transition {
-        Transition {
-            topics: vec![],
-            cond: Box::new(True),
-            actions: vec![],
-            target_id: None,
-        }
-    }
-    pub fn push_action(mut self, a: Box<Action>) -> Transition {
-        self.actions.push(a);
-        self
-    }
-    pub fn push_topic(mut self, topic: &str) -> Transition {
-        self.topics.push(topic.to_string());
-        self
-    }
-    pub fn with_cond(mut self, c: Box<Condition>) -> Transition {
-        self.cond = c;
-        self
-    }
-    pub fn with_target(mut self, id: &str) -> Transition {
-        self.target_id = Some(id.to_string());
-        self
-    }
+    #[builder(default="Condition::True(True)")]
+    cond: Condition,
+    #[builder(default="vec![]")]
+    actions: Vec<Action>,
+    #[builder(default="None")]
+    target_label: Option<StateLabel>,
 }

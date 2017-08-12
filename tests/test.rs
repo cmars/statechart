@@ -5,20 +5,61 @@ use statechart::*;
 
 #[test]
 fn hello_world() {
-    let st = Atomic::new("S").push_on_entry(Box::new(Log("hello world".to_string())));
+    let st = AtomicBuilder::default()
+        .label("S")
+        .on_entry(vec![Action::Log(LogBuilder::default().message("hello world").build().unwrap())])
+        .build()
+        .unwrap();
     println!("{:?}", st);
 }
 
 #[test]
 fn transitions() {
-    let st = Compound::new("S")
-        .push_substate(Box::new(Atomic::new("S1")
-            .push_transition(Transition::new().with_target("S2"))
-            .push_on_entry(Box::new(Log("hello s1".to_string())))))
-        .push_substate(Box::new(Atomic::new("S2")
-            .push_transition(Transition::new().with_target("S3"))
-            .push_on_entry(Box::new(Log("hello s2".to_string())))))
-        .push_substate(Box::new(Final::new("S3")
-            .push_on_entry(Box::new(Log("hello s3".to_string())))));
-    println!("{:?}", st);
+    let c = CompoundBuilder::default()
+        .label("S")
+        .substates(vec![State::Atomic(AtomicBuilder::default()
+                            .label("S1")
+                            .transitions(vec![TransitionBuilder::default()
+                                                  .target_label(Some("S2".to_string()))
+                                                  .build()
+                                                  .unwrap()])
+                            .on_entry(vec![Action::Log(LogBuilder::default()
+                                               .message("hello s1")
+                                               .build()
+                                               .unwrap())])
+                            .build()
+                            .unwrap()),
+                        State::Atomic(AtomicBuilder::default()
+                            .label("S2")
+                            .transitions(vec![TransitionBuilder::default()
+                                                  .target_label(Some("S3".to_string()))
+                                                  .build()
+                                                  .unwrap()])
+                            .on_entry(vec![Action::Log(LogBuilder::default()
+                                               .message("hello s2")
+                                               .build()
+                                               .unwrap())])
+                            .build()
+                            .unwrap()),
+                        State::Final(FinalBuilder::default()
+                            .label("S3")
+                            .on_entry(vec![Action::Log(LogBuilder::default()
+                                               .message("hello s3")
+                                               .build()
+                                               .unwrap())])
+                            .on_exit(vec![Action::Log(LogBuilder::default()
+                                              .message("and goodbye now")
+                                              .build()
+                                              .unwrap())])
+                            .build()
+                            .unwrap())])
+        .build()
+        .unwrap();
+    println!("{:?}", c);
+    let mut st = State::Compound(c);
+    st.set_root();
+    assert_eq!(st.substate("S1").unwrap().id(), &vec![0, 0]);
+    assert_eq!(st.substate("S2").unwrap().id(), &vec![0, 1]);
+    assert_eq!(st.substate("S3").unwrap().id(), &vec![0, 2]);
+    assert_eq!(st.substate("nonesuch"), None);
 }

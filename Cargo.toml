@@ -6,3 +6,4 @@ version = "0.0.0"
 authors = ["Casey Marshall <github@cmars.tech>"]
 
 [dependencies]
+derive_builder = "0.5.0"
