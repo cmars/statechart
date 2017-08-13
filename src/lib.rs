@@ -1,8 +1,10 @@
 #[macro_use]
 extern crate derive_builder;
 
+use std::cell::{RefCell, RefMut, Ref};
 use std::collections::HashMap;
 use std::io::Error;
+use std::rc::{Rc, Weak};
 
 pub type StateID = Vec<usize>;
 
@@ -36,8 +38,8 @@ pub struct Compound {
     on_exit: Vec<Action>,
     #[builder(default="vec![]")]
     transitions: Vec<Transition>,
-    #[builder(default="vec![]")]
-    substates: Vec<State>,
+    #[builder(default="RefCell::new(vec![])")]
+    substates: RefCell<Vec<Rc<State>>>,
 }
 
 #[derive(Debug, PartialEq, Clone, Builder)]
@@ -52,8 +54,8 @@ pub struct Parallel {
     on_exit: Vec<Action>,
     #[builder(default="vec![]")]
     transitions: Vec<Transition>,
-    #[builder(default="vec![]")]
-    substates: Vec<State>,
+    #[builder(default="RefCell::new(vec![])")]
+    substates: RefCell<Vec<Rc<State>>>,
 }
 
 #[derive(Debug, PartialEq, Clone, Builder)]
@@ -95,25 +97,33 @@ impl State {
             &State::Final(ref f) => &f.label,
         }
     }
-    pub fn substate(&self, label: &str) -> Option<&State> {
+    pub fn substate(&self, label: &str) -> Option<Rc<State>> {
         let ss = match self {
             &State::Atomic(ref a) => return None,
-            &State::Compound(ref c) => &c.substates,
-            &State::Parallel(ref p) => &p.substates,
+            &State::Compound(ref c) => c.substates.borrow(),
+            &State::Parallel(ref p) => p.substates.borrow(),
             &State::Final(ref f) => return None,
         };
         for i in 0..ss.len() {
             if ss[i].label() == label {
-                return Some(&ss[i]);
+                return Some(ss[i].clone());
             }
         }
         None
     }
-    fn mut_substates(&mut self) -> Option<&mut Vec<State>> {
+    fn substates(&self) -> Option<Ref<Vec<Rc<State>>>> {
+        match self {
+            &State::Atomic(ref a) => None,
+            &State::Compound(ref c) => Some(c.substates.borrow()),
+            &State::Parallel(ref p) => Some(p.substates.borrow()),
+            &State::Final(ref f) => None,
+        }
+    }
+    fn mut_substates(&mut self) -> Option<RefMut<Vec<Rc<State>>>> {
         match self {
             &mut State::Atomic(ref mut a) => None,
-            &mut State::Compound(ref mut c) => Some(&mut c.substates),
-            &mut State::Parallel(ref mut p) => Some(&mut p.substates),
+            &mut State::Compound(ref mut c) => Some(c.substates.borrow_mut()),
+            &mut State::Parallel(ref mut p) => Some(p.substates.borrow_mut()),
             &mut State::Final(ref mut f) => None,
         }
     }
@@ -140,7 +150,7 @@ impl State {
                 for i in 0..ss.len() {
                     let mut child_id = new_id.clone();
                     child_id.push(i);
-                    ss[i].set_id(child_id);
+                    Rc::get_mut(&mut ss[i]).unwrap().set_id(child_id);
                 }
             }
             None => {}
@@ -155,19 +165,40 @@ impl State {
 
 #[derive(Debug)]
 pub struct Context {
-    root: State,
+    root: Rc<State>,
     vars: Object,
     events: Vec<Event>,
+
+    states: HashMap<StateLabel, Weak<State>>,
 }
 
 impl Context {
     pub fn new(root: State) -> Context {
-        let mut root = root;
-        root.set_root();
-        Context {
-            root: root,
+        let mut root_ref = Rc::new(root);
+        {
+            Rc::get_mut(&mut root_ref).unwrap().set_root()
+        }
+        let mut ctx = Context {
+            root: root_ref.clone(),
             vars: Object::new(),
             events: vec![],
+            states: HashMap::new(),
+        };
+        ctx.index(root_ref);
+        ctx
+    }
+    fn index(&mut self, st: Rc<State>) {
+        self.states.insert(st.label().to_string(), Rc::downgrade(&st));
+        if let Some(substates) = st.substates() {
+            for i in 0..substates.len() {
+                self.index(substates[i].clone());
+            }
+        }
+    }
+    pub fn state(&self, label: &str) -> Option<Rc<State>> {
+        match self.states.get(&label.to_string()) {
+            Some(a) => a.upgrade(),
+            None => None,
         }
     }
 }
