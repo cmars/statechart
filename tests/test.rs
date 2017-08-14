@@ -18,22 +18,25 @@ fn hello_world() {
 
 #[test]
 fn transitions() {
-    let c = c123();
-    println!("{:?}", c);
-    let mut st = State::Compound(c);
-    st.set_root();
-    assert_eq!(st.id(), &vec![0]);
-    assert_eq!(st.substate("S1").unwrap().id(), &vec![0, 0]);
-    assert_eq!(st.substate("S2").unwrap().id(), &vec![0, 1]);
-    assert_eq!(st.substate("S3").unwrap().id(), &vec![0, 2]);
-    assert_eq!(st.substate("nonesuch"), None);
+    let ctx = Context::new(State::Compound(c123()));
+    let st = ctx.root();
+    assert_eq!(st.node().id(), &vec![0]);
+    assert_eq!(st.node().substate("S1").unwrap().node().id(), &vec![0, 0]);
+    assert_eq!(st.node().substate("S2").unwrap().node().id(), &vec![0, 1]);
+    assert_eq!(st.node().substate("S3").unwrap().node().id(), &vec![0, 2]);
+    assert_eq!(st.node().substate("nonesuch"), None);
 }
 
 #[test]
 fn context() {
     let st = State::Compound(c123());
     let ctx = Context::new(st);
-    assert_eq!(ctx.state("S1").unwrap().label(), "S1");
+    assert_eq!(ctx.state("S1").unwrap().node().label(), "S1");
+    for ss in vec!["S1", "S2", "S3"] {
+        assert_eq!(ctx.state(ss).unwrap().node().parent().upgrade().unwrap().node().label(),
+                   "S");
+    }
+    assert_eq!(ctx.state("S").unwrap().node().parent().upgrade(), None);
 }
 
 fn c123() -> Compound {

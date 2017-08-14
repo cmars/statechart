@@ -10,7 +10,14 @@ pub type StateID = Vec<usize>;
 
 pub type StateLabel = String;
 
-#[derive(Debug, PartialEq, Clone, Builder)]
+pub trait Node {
+    fn id(&self) -> &StateID;
+    fn label(&self) -> &StateLabel;
+    fn substate(&self, label: &str) -> Option<Rc<State>>;
+    fn parent(&self) -> Weak<State>;
+}
+
+#[derive(Debug, Clone, Builder)]
 pub struct Atomic {
     #[builder(default="vec![]")]
     id: StateID,
@@ -22,9 +29,39 @@ pub struct Atomic {
     on_exit: Vec<Action>,
     #[builder(default="vec![]")]
     transitions: Vec<Transition>,
+    #[builder(setter(skip))]
+    parent: Weak<State>,
 }
 
-#[derive(Debug, PartialEq, Clone, Builder)]
+impl PartialEq for Atomic {
+    fn eq(&self, other: &Self) -> bool {
+        (&self.id, &self.label, &self.on_entry, &self.on_exit, &self.transitions) ==
+        (&other.id, &other.label, &other.on_entry, &other.on_exit, &other.transitions)
+    }
+}
+
+impl Node for Atomic {
+    fn id(&self) -> &StateID {
+        &self.id
+    }
+    fn label(&self) -> &StateLabel {
+        &self.label
+    }
+    fn substate(&self, _: &str) -> Option<Rc<State>> {
+        None
+    }
+    fn parent(&self) -> Weak<State> {
+        self.parent.clone()
+    }
+}
+
+impl Atomic {
+    pub fn node(&self) -> &Node {
+        self as &Node
+    }
+}
+
+#[derive(Debug, Clone, Builder)]
 pub struct Compound {
     #[builder(default="vec![]")]
     id: StateID,
@@ -40,9 +77,57 @@ pub struct Compound {
     transitions: Vec<Transition>,
     #[builder(default="RefCell::new(vec![])")]
     substates: RefCell<Vec<Rc<State>>>,
+    #[builder(setter(skip))]
+    parent: Weak<State>,
 }
 
-#[derive(Debug, PartialEq, Clone, Builder)]
+impl PartialEq for Compound {
+    fn eq(&self, other: &Self) -> bool {
+        (&self.id,
+         &self.label,
+         &self.initial_label,
+         &self.on_entry,
+         &self.on_exit,
+         &self.transitions,
+         &self.substates) ==
+        (&other.id,
+         &other.label,
+         &other.initial_label,
+         &other.on_entry,
+         &other.on_exit,
+         &other.transitions,
+         &other.substates)
+    }
+}
+
+impl Node for Compound {
+    fn id(&self) -> &StateID {
+        &self.id
+    }
+    fn label(&self) -> &StateLabel {
+        &self.label
+    }
+    fn substate(&self, label: &str) -> Option<Rc<State>> {
+        let ss = self.substates.borrow();
+        for i in 0..ss.len() {
+            if ss[i].node().label() == label {
+                return Some(ss[i].clone());
+            }
+        }
+        None
+    }
+    fn parent(&self) -> Weak<State> {
+        self.parent.clone()
+    }
+}
+
+impl Compound {
+    pub fn node(&self) -> &Node {
+        self as &Node
+    }
+}
+
+#[derive(Debug, Clone, Builder)]
 pub struct Parallel {
     #[builder(default="vec![]")]
     id: StateID,
@@ -56,9 +141,55 @@ pub struct Parallel {
     transitions: Vec<Transition>,
     #[builder(default="RefCell::new(vec![])")]
     substates: RefCell<Vec<Rc<State>>>,
+    #[builder(setter(skip))]
+    parent: Weak<State>,
 }
 
-#[derive(Debug, PartialEq, Clone, Builder)]
+impl PartialEq for Parallel {
+    fn eq(&self, other: &Self) -> bool {
+        (&self.id,
+         &self.label,
+         &self.on_entry,
+         &self.on_exit,
+         &self.transitions,
+         &self.substates) ==
+        (&other.id,
+         &other.label,
+         &other.on_entry,
+         &other.on_exit,
+         &other.transitions,
+         &other.substates)
+    }
+}
+
+impl Node for Parallel {
+    fn id(&self) -> &StateID {
+        &self.id
+    }
+    fn label(&self) -> &StateLabel {
+        &self.label
+    }
+    fn substate(&self, label: &str) -> Option<Rc<State>> {
+        let ss = self.substates.borrow();
+        for i in 0..ss.len() {
+            if ss[i].node().label() == label {
+                return Some(ss[i].clone());
+            }
+        }
+        None
+    }
+    fn parent(&self) -> Weak<State> {
+        self.parent.clone()
+    }
+}
+
+impl Parallel {
+    pub fn node(&self) -> &Node {
+        self as &Node
+    }
+}
+
+#[derive(Debug, Clone, Builder)]
 pub struct Final {
     #[builder(default="vec![]")]
     id: StateID,
@@ -70,6 +201,36 @@ pub struct Final {
     on_exit: Vec<Action>,
     #[builder(default="Output::Empty(Empty)")]
     result: Output,
+    #[builder(setter(skip))]
+    parent: Weak<State>,
+}
+
+impl PartialEq for Final {
+    fn eq(&self, other: &Self) -> bool {
+        (&self.id, &self.label, &self.on_entry, &self.on_exit, &self.result) ==
+        (&other.id, &other.label, &other.on_entry, &other.on_exit, &other.result)
+    }
+}
+
+impl Node for Final {
+    fn id(&self) -> &StateID {
+        &self.id
+    }
+    fn label(&self) -> &StateLabel {
+        &self.label
+    }
+    fn substate(&self, _: &str) -> Option<Rc<State>> {
+        None
+    }
+    fn parent(&self) -> Weak<State> {
+        self.parent.clone()
+    }
+}
+
+impl Final {
+    pub fn node(&self) -> &Node {
+        self as &Node
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -81,35 +242,13 @@ pub enum State {
 }
 
 impl State {
-    pub fn id(&self) -> &StateID {
+    pub fn node(&self) -> &Node {
         match self {
-            &State::Atomic(ref a) => &a.id,
-            &State::Compound(ref c) => &c.id,
-            &State::Parallel(ref p) => &p.id,
-            &State::Final(ref f) => &f.id,
+            &State::Atomic(ref a) => a.node(),
+            &State::Compound(ref c) => c.node(),
+            &State::Parallel(ref p) => p.node(),
+            &State::Final(ref f) => f.node(),
         }
-    }
-    pub fn label(&self) -> &StateLabel {
-        match self {
-            &State::Atomic(ref a) => &a.label,
-            &State::Compound(ref c) => &c.label,
-            &State::Parallel(ref p) => &p.label,
-            &State::Final(ref f) => &f.label,
-        }
-    }
-    pub fn substate(&self, label: &str) -> Option<Rc<State>> {
-        let ss = match self {
-            &State::Atomic(ref a) => return None,
-            &State::Compound(ref c) => c.substates.borrow(),
-            &State::Parallel(ref p) => p.substates.borrow(),
-            &State::Final(ref f) => return None,
-        };
-        for i in 0..ss.len() {
-            if ss[i].label() == label {
-                return Some(ss[i].clone());
-            }
-        }
-        None
     }
     fn substates(&self) -> Option<Ref<Vec<Rc<State>>>> {
         match self {
@@ -119,46 +258,56 @@ impl State {
             &State::Final(ref f) => None,
         }
     }
-    fn mut_substates(&mut self) -> Option<RefMut<Vec<Rc<State>>>> {
+    fn mut_substates(&self) -> Option<RefMut<Vec<Rc<State>>>> {
         match self {
-            &mut State::Atomic(ref mut a) => None,
-            &mut State::Compound(ref mut c) => Some(c.substates.borrow_mut()),
-            &mut State::Parallel(ref mut p) => Some(p.substates.borrow_mut()),
-            &mut State::Final(ref mut f) => None,
+            &State::Atomic(ref a) => None,
+            &State::Compound(ref c) => Some(c.substates.borrow_mut()),
+            &State::Parallel(ref p) => Some(p.substates.borrow_mut()),
+            &State::Final(ref f) => None,
         }
     }
-    pub fn set_root(&mut self) {
-        self.set_id(vec![0]);
-    }
-    fn set_id(&mut self, new_id: StateID) {
-        let id = {
-            match self {
-                &mut State::Atomic(ref mut a) => {
-                    a.id = new_id;
-                    return;
-                }
-                &mut State::Compound(ref mut c) => c.id = new_id.clone(),
-                &mut State::Parallel(ref mut p) => p.id = new_id.clone(),
-                &mut State::Final(ref mut f) => {
-                    f.id = new_id;
-                    return;
-                }
-            }
-        };
-        match self.mut_substates() {
-            Some(ref mut ss) => {
-                for i in 0..ss.len() {
-                    let mut child_id = new_id.clone();
-                    child_id.push(i);
-                    Rc::get_mut(&mut ss[i]).unwrap().set_id(child_id);
-                }
-            }
-            None => {}
+    fn set_parent(&mut self, parent: Weak<State>) {
+        match self {
+            &mut State::Atomic(ref mut a) => a.parent = parent,
+            &mut State::Compound(ref mut c) => c.parent = parent,
+            &mut State::Parallel(ref mut p) => p.parent = parent,
+            &mut State::Final(ref mut f) => f.parent = parent,
         }
     }
     fn prepend_id(parent: &StateID, target: &mut StateID) {
         for i in parent.len() - 1..0 {
             target.insert(0, parent[i]);
+        }
+    }
+    fn init(st_ref: &mut Rc<State>, id: StateID) {
+        {
+            let st = Rc::get_mut(st_ref).unwrap();
+            match st {
+                &mut State::Atomic(ref mut a) => {
+                    a.id = id;
+                    return;
+                }
+                &mut State::Final(ref mut f) => {
+                    f.id = id;
+                    return;
+                }
+                &mut State::Compound(ref mut c) => c.id = id.clone(),
+                &mut State::Parallel(ref mut p) => p.id = id.clone(),
+            }
+        }
+        match st_ref.mut_substates() {
+            Some(ref mut ss) => {
+                for i in 0..ss.len() {
+                    let mut child_id = id.clone();
+                    child_id.push(i);
+                    {
+                        let child_st = Rc::get_mut(&mut ss[i]).unwrap();
+                        child_st.set_parent(Rc::downgrade(st_ref));
+                    }
+                    State::init(&mut ss[i], child_id);
+                }
+            }
+            None => {}
         }
     }
 }
@@ -169,37 +318,50 @@ pub struct Context {
     vars: Object,
     events: Vec<Event>,
 
-    states: HashMap<StateLabel, Weak<State>>,
+    state_by_id: HashMap<StateID, Weak<State>>,
+    state_by_label: HashMap<StateLabel, Weak<State>>,
 }
 
 impl Context {
     pub fn new(root: State) -> Context {
         let mut root_ref = Rc::new(root);
         {
-            Rc::get_mut(&mut root_ref).unwrap().set_root()
+            State::init(&mut root_ref, vec![0])
         }
         let mut ctx = Context {
             root: root_ref.clone(),
             vars: Object::new(),
             events: vec![],
-            states: HashMap::new(),
+            state_by_id: HashMap::new(),
+            state_by_label: HashMap::new(),
         };
         ctx.index(root_ref);
         ctx
     }
     fn index(&mut self, st: Rc<State>) {
-        self.states.insert(st.label().to_string(), Rc::downgrade(&st));
+        self.state_by_id.insert(st.node().id().clone(), Rc::downgrade(&st));
+        self.state_by_label.insert(st.node().label().to_string(), Rc::downgrade(&st));
         if let Some(substates) = st.substates() {
             for i in 0..substates.len() {
                 self.index(substates[i].clone());
             }
         }
     }
+    pub fn root(&self) -> Rc<State> {
+        self.root.clone()
+    }
     pub fn state(&self, label: &str) -> Option<Rc<State>> {
-        match self.states.get(&label.to_string()) {
+        match self.state_by_label.get(&label.to_string()) {
             Some(a) => a.upgrade(),
             None => None,
         }
+    }
+    pub fn enter_state(&mut self, st: Rc<State>) {
+        // pop any prior state up to common ancestor off configuration
+        //  - triggering popped states' on_exit
+        // push all disjoint ancestors of st not in common onto configuration
+        //  - triggering pushed states' on_enter
+        // process transitions
     }
 }
 
