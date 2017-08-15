@@ -15,6 +15,8 @@ pub trait Node {
     fn label(&self) -> &StateLabel;
     fn substate(&self, label: &str) -> Option<Rc<State>>;
     fn parent(&self) -> Weak<State>;
+    fn on_entry(&self) -> &Vec<Action>;
+    fn on_exit(&self) -> &Vec<Action>;
 }
 
 #[derive(Debug, Clone, Builder)]
@@ -52,6 +54,12 @@ impl Node for Atomic {
     }
     fn parent(&self) -> Weak<State> {
         self.parent.clone()
+    }
+    fn on_entry(&self) -> &Vec<Action> {
+        &self.on_entry
+    }
+    fn on_exit(&self) -> &Vec<Action> {
+        &self.on_exit
     }
 }
 
@@ -119,6 +127,12 @@ impl Node for Compound {
     fn parent(&self) -> Weak<State> {
         self.parent.clone()
     }
+    fn on_entry(&self) -> &Vec<Action> {
+        &self.on_entry
+    }
+    fn on_exit(&self) -> &Vec<Action> {
+        &self.on_exit
+    }
 }
 
 impl Compound {
@@ -181,6 +195,12 @@ impl Node for Parallel {
     fn parent(&self) -> Weak<State> {
         self.parent.clone()
     }
+    fn on_entry(&self) -> &Vec<Action> {
+        &self.on_entry
+    }
+    fn on_exit(&self) -> &Vec<Action> {
+        &self.on_exit
+    }
 }
 
 impl Parallel {
@@ -224,6 +244,12 @@ impl Node for Final {
     }
     fn parent(&self) -> Weak<State> {
         self.parent.clone()
+    }
+    fn on_entry(&self) -> &Vec<Action> {
+        &self.on_entry
+    }
+    fn on_exit(&self) -> &Vec<Action> {
+        &self.on_exit
     }
 }
 
@@ -320,6 +346,13 @@ pub struct Context {
 
     state_by_id: HashMap<StateID, Weak<State>>,
     state_by_label: HashMap<StateLabel, Weak<State>>,
+
+    current_config: Weak<State>,
+}
+
+pub enum Fault {
+    LabelNotFound(StateLabel),
+    IDNotFound(StateID),
 }
 
 impl Context {
@@ -334,6 +367,7 @@ impl Context {
             events: vec![],
             state_by_id: HashMap::new(),
             state_by_label: HashMap::new(),
+            current_config: Weak::new(),
         };
         ctx.index(root_ref);
         ctx
@@ -356,17 +390,92 @@ impl Context {
             None => None,
         }
     }
-    pub fn enter_state(&mut self, st: Rc<State>) {
-        // pop any prior state up to common ancestor off configuration
-        //  - triggering popped states' on_exit
-        // push all disjoint ancestors of st not in common onto configuration
-        //  - triggering pushed states' on_enter
-        // process transitions
+    pub fn state_by_id(&self, id: &StateID) -> Option<Rc<State>> {
+        match self.state_by_id.get(id) {
+            Some(a) => a.upgrade(),
+            None => None,
+        }
+    }
+    pub fn enter_state(&mut self, t: Transition) -> Result<(), Fault> {
+        let target_label = match t.target_label {
+            Some(ref label) => label,
+            None => return Ok(()),
+        };
+        let target_st = match self.state(target_label) {
+            Some(r) => r,
+            None => return Err(Fault::LabelNotFound(target_label.clone())),
+        };
+        let current_id = match self.current_config.upgrade() {
+            Some(ref st) => st.node().id().clone(),
+            None => vec![],
+        };
+        // Execute on_exit for all states we are leaving in this transition.
+        let exit_states = Context::exit_states(&current_id, target_st.node().id());
+        for id in exit_states {
+            let exit_state = match self.state_by_id(&id) {
+                Some(st) => st,
+                None => return Err(Fault::IDNotFound(id.clone())),
+            };
+            for on_exit in exit_state.node().on_exit() {
+                on_exit.actionable().apply(self)?;
+            }
+        }
+        // Execute actions in the current transition.
+        for t_action in t.actions {
+            t_action.actionable().apply(self)?;
+        }
+        // Execute on_entry for all states we are entering in this transition.
+        let entry_states = Context::entry_states(&current_id, target_st.node().id());
+        for id in entry_states {
+            let entry_state = match self.state_by_id(&id) {
+                Some(st) => st,
+                None => return Err(Fault::IDNotFound(id.clone())),
+            };
+            for on_entry in entry_state.node().on_entry() {
+                on_entry.actionable().apply(self)?;
+            }
+        }
+        self.current_config = Rc::downgrade(&target_st);
+        Ok(())
+    }
+    pub fn common_ancestor(from: &StateID, to: &StateID) -> StateID {
+        let mut common = vec![];
+        for i in 0..from.len() {
+            if i >= to.len() {
+                break;
+            }
+            if from[i] == to[i] {
+                common.push(from[i]);
+            } else {
+                break;
+            }
+        }
+        common
+    }
+    pub fn exit_states(from: &StateID, to: &StateID) -> Vec<StateID> {
+        let common = Context::common_ancestor(from, to);
+        let mut result = vec![];
+        let mut i = from.len();
+        while i > common.len() {
+            let id = from[0..i].to_vec();
+            result.push(id);
+            i = i - 1;
+        }
+        result
+    }
+    pub fn entry_states(from: &StateID, to: &StateID) -> Vec<StateID> {
+        let common = Context::common_ancestor(from, to);
+        let mut result = vec![];
+        for i in common.len()..to.len() {
+            let id = to[0..i + 1].to_vec();
+            result.push(id);
+        }
+        result
     }
 }
 
 pub trait Actionable {
-    fn apply(&self, &mut Context) -> Result<(), Error>;
+    fn apply(&self, &mut Context) -> Result<(), Fault>;
 }
 
 #[derive(Debug, PartialEq, Clone, Builder)]
@@ -378,7 +487,7 @@ pub struct Log {
 }
 
 impl Actionable for Log {
-    fn apply(&self, _: &mut Context) -> Result<(), Error> {
+    fn apply(&self, _: &mut Context) -> Result<(), Fault> {
         println!("[{:?}]{}: {}",
                  std::time::SystemTime::now(),
                  self.label,
@@ -396,7 +505,7 @@ pub struct Send {
 }
 
 impl Actionable for Send {
-    fn apply(&self, ctx: &mut Context) -> Result<(), Error> {
+    fn apply(&self, ctx: &mut Context) -> Result<(), Fault> {
         ctx.events.push(Event {
             topic: self.topic.clone(),
             contents: self.contents.clone(),
