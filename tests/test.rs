@@ -47,10 +47,6 @@ fn context() {
 fn c123() -> Compound {
     CompoundBuilder::default()
         .label("S")
-        .transitions(vec![TransitionBuilder::default()
-                              .target_label(Some("S1".to_string()))
-                              .build()
-                              .unwrap()])
         .substates(RefCell::new(vec![Rc::new(State::Atomic(AtomicBuilder::default()
                                          .label("S1")
                                          .transitions(vec![TransitionBuilder::default()

@@ -1,6 +1,8 @@
 #[macro_use]
 extern crate derive_builder;
 
+extern crate chrono;
+
 use std::cell::{RefCell, RefMut, Ref};
 use std::collections::HashMap;
 use std::io::Error;
@@ -14,6 +16,7 @@ pub trait Node {
     fn id(&self) -> &StateID;
     fn label(&self) -> &StateLabel;
     fn substate(&self, label: &str) -> Option<Rc<State>>;
+    fn initial(&self) -> Option<StateLabel>;
     fn parent(&self) -> Weak<State>;
     fn on_entry(&self) -> &Vec<Action>;
     fn on_exit(&self) -> &Vec<Action>;
@@ -54,6 +57,9 @@ impl Node for Atomic {
         &self.label
     }
     fn substate(&self, _: &str) -> Option<Rc<State>> {
+        None
+    }
+    fn initial(&self) -> Option<StateLabel> {
         None
     }
     fn parent(&self) -> Weak<State> {
@@ -136,6 +142,19 @@ impl Node for Compound {
         }
         None
     }
+    fn initial(&self) -> Option<StateLabel> {
+        match self.initial_label {
+            Some(ref l) => Some(l.to_string()),
+            None => {
+                let ss = self.substates.borrow();
+                if ss.len() > 0 {
+                    Some(ss[0].node().label().to_string())
+                } else {
+                    None
+                }
+            }
+        }
+    }
     fn parent(&self) -> Weak<State> {
         self.parent.clone()
     }
@@ -212,6 +231,9 @@ impl Node for Parallel {
         }
         None
     }
+    fn initial(&self) -> Option<StateLabel> {
+        None
+    }
     fn parent(&self) -> Weak<State> {
         self.parent.clone()
     }
@@ -268,6 +290,9 @@ impl Node for Final {
         &self.label
     }
     fn substate(&self, _: &str) -> Option<Rc<State>> {
+        None
+    }
+    fn initial(&self) -> Option<StateLabel> {
         None
     }
     fn parent(&self) -> Weak<State> {
@@ -434,6 +459,12 @@ impl Context {
             None => None,
         }
     }
+    fn current_config(&self) -> Result<Rc<State>, Fault> {
+        match self.current_config.upgrade() {
+            Some(r) => Ok(r),
+            None => Err(Fault::CurrentStateUndefined),
+        }
+    }
     pub fn run(&mut self) -> Result<Output, Fault> {
         let start_t = TransitionBuilder::default()
             .target_label(Some(self.root.node().label().clone()))
@@ -441,68 +472,75 @@ impl Context {
             .unwrap();
         self.enter_state(&start_t)?;
         loop {
-            let current = self.current_config.upgrade();
-            match current {
-                None => return Err(Fault::CurrentStateUndefined),
-                Some(st) => {
-                    if let State::Final(ref f) = *st {
-                        return Ok(f.result.clone());
-                    }
-                    match self.next_transition(st.active_node().unwrap().transitions()) {
-                        Some(ref next_t) => self.enter_state(next_t)?,
-                        None => panic!("help i'm stuck implement external events please!"),
+            let current = self.current_config()?;
+            if let State::Final(ref f) = *current {
+                return Ok(f.result.clone());
+            }
+            match self.next_transition(current.active_node().unwrap().transitions()) {
+                Some(ref next_t) => self.enter_state(next_t)?,
+                None => {
+                    // Transition to initial substate if composite.
+                    let current = self.current_config()?;
+                    if let Some(label) = current.node().initial() {
+                        self.enter_state(&TransitionBuilder::default()
+                                .target_label(Some(label))
+                                .build()
+                                .unwrap())?;
+                    } else {
+                        panic!("help i'm stuck implement external events please!");
                     }
                 }
             }
         }
     }
     pub fn enter_state(&mut self, t: &Transition) -> Result<(), Fault> {
-        let target_label = match t.target_label {
-            Some(ref label) => label,
+        match t.target_label {
             None => {
                 // Execute actions in the current transition and that's it.
                 for i in 0..t.actions.len() {
                     t.actions[i].actionable().apply(self)?;
                 }
-                return Ok(());
+                Ok(())
             }
-        };
-        let target_st = match self.state(target_label) {
-            Some(r) => r,
-            None => return Err(Fault::LabelNotFound(target_label.clone())),
-        };
-        let current_id = match self.current_config.upgrade() {
-            Some(ref st) => st.node().id().clone(),
-            None => vec![],
-        };
-        // Execute on_exit for all states we are leaving in this transition.
-        let exit_states = Context::exit_states(&current_id, target_st.node().id());
-        for id in exit_states {
-            let exit_state = match self.state_by_id(&id) {
-                Some(st) => st,
-                None => return Err(Fault::IDNotFound(id.clone())),
-            };
-            for on_exit in exit_state.node().on_exit() {
-                on_exit.actionable().apply(self)?;
+            Some(ref target_label) => {
+                let target_st = match self.state(target_label) {
+                    Some(r) => r,
+                    None => return Err(Fault::LabelNotFound(target_label.clone())),
+                };
+                let current_id = match self.current_config.upgrade() {
+                    Some(ref st) => st.node().id().clone(),
+                    None => vec![],
+                };
+                // Execute on_exit for all states we are leaving in this transition.
+                let exit_states = Context::exit_states(&current_id, target_st.node().id());
+                for id in exit_states {
+                    let exit_state = match self.state_by_id(&id) {
+                        Some(st) => st,
+                        None => return Err(Fault::IDNotFound(id.clone())),
+                    };
+                    for on_exit in exit_state.node().on_exit() {
+                        on_exit.actionable().apply(self)?;
+                    }
+                }
+                // Execute actions in the current transition.
+                for i in 0..t.actions.len() {
+                    t.actions[i].actionable().apply(self)?;
+                }
+                // Execute on_entry for all states we are entering in this transition.
+                let entry_states = Context::entry_states(&current_id, target_st.node().id());
+                for id in entry_states {
+                    let entry_state = match self.state_by_id(&id) {
+                        Some(st) => st,
+                        None => return Err(Fault::IDNotFound(id.clone())),
+                    };
+                    for on_entry in entry_state.node().on_entry() {
+                        on_entry.actionable().apply(self)?;
+                    }
+                }
+                self.current_config = Rc::downgrade(&target_st);
+                Ok(())
             }
         }
-        // Execute actions in the current transition.
-        for i in 0..t.actions.len() {
-            t.actions[i].actionable().apply(self)?;
-        }
-        // Execute on_entry for all states we are entering in this transition.
-        let entry_states = Context::entry_states(&current_id, target_st.node().id());
-        for id in entry_states {
-            let entry_state = match self.state_by_id(&id) {
-                Some(st) => st,
-                None => return Err(Fault::IDNotFound(id.clone())),
-            };
-            for on_entry in entry_state.node().on_entry() {
-                on_entry.actionable().apply(self)?;
-            }
-        }
-        self.current_config = Rc::downgrade(&target_st);
-        Ok(())
     }
     pub fn common_ancestor(from: &StateID, to: &StateID) -> StateID {
         let mut common = vec![];
@@ -562,8 +600,8 @@ pub struct Log {
 
 impl Actionable for Log {
     fn apply(&self, _: &mut Context) -> Result<(), Fault> {
-        println!("[{:?}]{}: {}",
-                 std::time::SystemTime::now(),
+        println!("[{}]{}: {}",
+                 chrono::prelude::Utc::now().format("%Y-%m-%d %H:%M:%S"),
                  self.label,
                  self.message);
         Ok(())
