@@ -5,7 +5,6 @@ extern crate chrono;
 
 use std::cell::{RefCell, RefMut, Ref};
 use std::collections::HashMap;
-use std::io::Error;
 use std::rc::{Rc, Weak};
 
 pub type StateID = Vec<usize>;
@@ -334,23 +333,23 @@ impl State {
             &State::Atomic(ref a) => Some(a.active_node()),
             &State::Compound(ref c) => Some(c.active_node()),
             &State::Parallel(ref p) => Some(p.active_node()),
-            &State::Final(ref f) => None,
+            &State::Final(_) => None,
         }
     }
     fn substates(&self) -> Option<Ref<Vec<Rc<State>>>> {
         match self {
-            &State::Atomic(ref a) => None,
+            &State::Atomic(_) => None,
             &State::Compound(ref c) => Some(c.substates.borrow()),
             &State::Parallel(ref p) => Some(p.substates.borrow()),
-            &State::Final(ref f) => None,
+            &State::Final(_) => None,
         }
     }
     fn mut_substates(&self) -> Option<RefMut<Vec<Rc<State>>>> {
         match self {
-            &State::Atomic(ref a) => None,
+            &State::Atomic(_) => None,
             &State::Compound(ref c) => Some(c.substates.borrow_mut()),
             &State::Parallel(ref p) => Some(p.substates.borrow_mut()),
-            &State::Final(ref f) => None,
+            &State::Final(_) => None,
         }
     }
     fn set_parent(&mut self, parent: Weak<State>) {
@@ -359,11 +358,6 @@ impl State {
             &mut State::Compound(ref mut c) => c.parent = parent,
             &mut State::Parallel(ref mut p) => p.parent = parent,
             &mut State::Final(ref mut f) => f.parent = parent,
-        }
-    }
-    fn prepend_id(parent: &StateID, target: &mut StateID) {
-        for i in parent.len() - 1..0 {
-            target.insert(0, parent[i]);
         }
     }
     fn init(st_ref: &mut Rc<State>, id: StateID) {
