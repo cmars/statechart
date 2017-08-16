@@ -1,6 +1,7 @@
 #[cfg(test)]
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 extern crate statechart;
@@ -30,18 +31,26 @@ fn transitions() {
 #[test]
 fn context() {
     let st = State::Compound(c123());
-    let ctx = Context::new(st);
+    let mut ctx = Context::new(st);
     assert_eq!(ctx.state("S1").unwrap().node().label(), "S1");
     for ss in vec!["S1", "S2", "S3"] {
         assert_eq!(ctx.state(ss).unwrap().node().parent().upgrade().unwrap().node().label(),
                    "S");
     }
     assert_eq!(ctx.state("S").unwrap().node().parent().upgrade(), None);
+    let result = ctx.run();
+    assert!(result.is_ok(), "{:?}", result);
+    assert_eq!(result.unwrap().outputable().eval(&ctx),
+               Value::Object(HashMap::new()));
 }
 
 fn c123() -> Compound {
     CompoundBuilder::default()
         .label("S")
+        .transitions(vec![TransitionBuilder::default()
+                              .target_label(Some("S1".to_string()))
+                              .build()
+                              .unwrap()])
         .substates(RefCell::new(vec![Rc::new(State::Atomic(AtomicBuilder::default()
                                          .label("S1")
                                          .transitions(vec![TransitionBuilder::default()

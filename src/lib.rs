@@ -19,6 +19,10 @@ pub trait Node {
     fn on_exit(&self) -> &Vec<Action>;
 }
 
+pub trait ActiveNode: Node {
+    fn transitions(&self) -> &Vec<Transition>;
+}
+
 #[derive(Debug, Clone, Builder)]
 pub struct Atomic {
     #[builder(default="vec![]")]
@@ -62,10 +66,18 @@ impl Node for Atomic {
         &self.on_exit
     }
 }
+impl ActiveNode for Atomic {
+    fn transitions(&self) -> &Vec<Transition> {
+        &self.transitions
+    }
+}
 
 impl Atomic {
     pub fn node(&self) -> &Node {
         self as &Node
+    }
+    pub fn active_node(&self) -> &ActiveNode {
+        self as &ActiveNode
     }
 }
 
@@ -134,10 +146,18 @@ impl Node for Compound {
         &self.on_exit
     }
 }
+impl ActiveNode for Compound {
+    fn transitions(&self) -> &Vec<Transition> {
+        &self.transitions
+    }
+}
 
 impl Compound {
     pub fn node(&self) -> &Node {
         self as &Node
+    }
+    pub fn active_node(&self) -> &ActiveNode {
+        self as &ActiveNode
     }
 }
 
@@ -202,10 +222,18 @@ impl Node for Parallel {
         &self.on_exit
     }
 }
+impl ActiveNode for Parallel {
+    fn transitions(&self) -> &Vec<Transition> {
+        &self.transitions
+    }
+}
 
 impl Parallel {
     pub fn node(&self) -> &Node {
         self as &Node
+    }
+    pub fn active_node(&self) -> &ActiveNode {
+        self as &ActiveNode
     }
 }
 
@@ -274,6 +302,14 @@ impl State {
             &State::Compound(ref c) => c.node(),
             &State::Parallel(ref p) => p.node(),
             &State::Final(ref f) => f.node(),
+        }
+    }
+    pub fn active_node(&self) -> Option<&ActiveNode> {
+        match self {
+            &State::Atomic(ref a) => Some(a.active_node()),
+            &State::Compound(ref c) => Some(c.active_node()),
+            &State::Parallel(ref p) => Some(p.active_node()),
+            &State::Final(ref f) => None,
         }
     }
     fn substates(&self) -> Option<Ref<Vec<Rc<State>>>> {
@@ -350,9 +386,11 @@ pub struct Context {
     current_config: Weak<State>,
 }
 
+#[derive(Debug)]
 pub enum Fault {
     LabelNotFound(StateLabel),
     IDNotFound(StateID),
+    CurrentStateUndefined,
 }
 
 impl Context {
@@ -396,10 +434,38 @@ impl Context {
             None => None,
         }
     }
-    pub fn enter_state(&mut self, t: Transition) -> Result<(), Fault> {
+    pub fn run(&mut self) -> Result<Output, Fault> {
+        let start_t = TransitionBuilder::default()
+            .target_label(Some(self.root.node().label().clone()))
+            .build()
+            .unwrap();
+        self.enter_state(&start_t)?;
+        loop {
+            let current = self.current_config.upgrade();
+            match current {
+                None => return Err(Fault::CurrentStateUndefined),
+                Some(st) => {
+                    if let State::Final(ref f) = *st {
+                        return Ok(f.result.clone());
+                    }
+                    match self.next_transition(st.active_node().unwrap().transitions()) {
+                        Some(ref next_t) => self.enter_state(next_t)?,
+                        None => panic!("help i'm stuck implement external events please!"),
+                    }
+                }
+            }
+        }
+    }
+    pub fn enter_state(&mut self, t: &Transition) -> Result<(), Fault> {
         let target_label = match t.target_label {
             Some(ref label) => label,
-            None => return Ok(()),
+            None => {
+                // Execute actions in the current transition and that's it.
+                for i in 0..t.actions.len() {
+                    t.actions[i].actionable().apply(self)?;
+                }
+                return Ok(());
+            }
         };
         let target_st = match self.state(target_label) {
             Some(r) => r,
@@ -421,8 +487,8 @@ impl Context {
             }
         }
         // Execute actions in the current transition.
-        for t_action in t.actions {
-            t_action.actionable().apply(self)?;
+        for i in 0..t.actions.len() {
+            t.actions[i].actionable().apply(self)?;
         }
         // Execute on_entry for all states we are entering in this transition.
         let entry_states = Context::entry_states(&current_id, target_st.node().id());
@@ -471,6 +537,14 @@ impl Context {
             result.push(id);
         }
         result
+    }
+    fn next_transition<'a>(&self, ts: &'a Vec<Transition>) -> Option<&'a Transition> {
+        for i in 0..ts.len() {
+            if ts[i].cond.conditional().eval(self) {
+                return Some(&ts[i]);
+            }
+        }
+        None
     }
 }
 
@@ -548,7 +622,7 @@ pub enum Condition {
 }
 
 impl Condition {
-    fn conditional(&self) -> &Conditional {
+    pub fn conditional(&self) -> &Conditional {
         match self {
             &Condition::True(ref c) => c,
         }
@@ -574,7 +648,7 @@ pub enum Output {
 }
 
 impl Output {
-    fn outputable(&self) -> &Outputable {
+    pub fn outputable(&self) -> &Outputable {
         match self {
             &Output::Empty(ref o) => o,
         }
