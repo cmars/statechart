@@ -39,9 +39,8 @@ fn context() {
     }
     assert_eq!(ctx.state("S").unwrap().node().parent().upgrade(), None);
     let result = ctx.run();
-    assert!(result.is_ok(), "{:?}", result);
-    assert_eq!(result.unwrap().outputable().eval(&ctx),
-               Value::Object(HashMap::new()));
+    assert!(result.is_ok(), "{:?}", result.err().unwrap());
+    assert_eq!(result.unwrap(), Value::Object(HashMap::new()));
 }
 
 fn c123() -> Compound {

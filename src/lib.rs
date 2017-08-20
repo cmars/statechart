@@ -4,7 +4,7 @@ extern crate derive_builder;
 extern crate chrono;
 
 use std::cell::{RefCell, RefMut, Ref};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::{Rc, Weak};
 
 pub type StateID = Vec<usize>;
@@ -397,12 +397,13 @@ impl State {
 pub struct Context {
     root: Rc<State>,
     vars: Object,
-    events: Vec<Event>,
+    events: EventQueue,
 
     state_by_id: HashMap<StateID, Weak<State>>,
     state_by_label: HashMap<StateLabel, Weak<State>>,
 
     current_config: Weak<State>,
+    current_event: Option<Event>,
 }
 
 #[derive(Debug)]
@@ -421,10 +422,11 @@ impl Context {
         let mut ctx = Context {
             root: root_ref.clone(),
             vars: Object::new(),
-            events: vec![],
+            events: EventQueue::new(),
             state_by_id: HashMap::new(),
             state_by_label: HashMap::new(),
             current_config: Weak::new(),
+            current_event: None,
         };
         ctx.index(root_ref);
         ctx
@@ -453,13 +455,16 @@ impl Context {
             None => None,
         }
     }
+    pub fn get_var(&self, key: &str) -> Option<&Value> {
+        self.vars.get(key)
+    }
     fn current_config(&self) -> Result<Rc<State>, Fault> {
         match self.current_config.upgrade() {
             Some(r) => Ok(r),
             None => Err(Fault::CurrentStateUndefined),
         }
     }
-    pub fn run(&mut self) -> Result<Output, Fault> {
+    pub fn run(&mut self) -> Result<Value, Fault> {
         let start_t = TransitionBuilder::default()
             .target_label(Some(self.root.node().label().clone()))
             .build()
@@ -468,22 +473,18 @@ impl Context {
         loop {
             let current = self.current_config()?;
             if let State::Final(ref f) = *current {
-                return Ok(f.result.clone());
+                return Ok(f.result.outputable().eval(self));
             }
-            match self.next_transition(current.active_node().unwrap().transitions()) {
-                Some(ref next_t) => self.enter_state(next_t)?,
-                None => {
-                    // Transition to initial substate if composite.
-                    let current = self.current_config()?;
-                    if let Some(label) = current.node().initial() {
-                        self.enter_state(&TransitionBuilder::default()
-                                .target_label(Some(label))
-                                .build()
-                                .unwrap())?;
-                    } else {
-                        panic!("help i'm stuck implement external events please!");
-                    }
-                }
+            if let Some(ref next_t) =
+                self.next_transition(current.active_node().unwrap().transitions()) {
+                self.enter_state(next_t)?;
+            } else if let Some(label) = current.node().initial() {
+                self.enter_state(&TransitionBuilder::default()
+                        .target_label(Some(label))
+                        .build()
+                        .unwrap())?;
+            } else {
+                panic!("help i'm stuck implement external events please!");
             }
         }
     }
@@ -570,13 +571,25 @@ impl Context {
         }
         result
     }
-    fn next_transition<'a>(&self, ts: &'a Vec<Transition>) -> Option<&'a Transition> {
+    fn next_transition<'a>(&mut self, ts: &'a Vec<Transition>) -> Option<&'a Transition> {
         for i in 0..ts.len() {
-            if ts[i].cond.conditional().eval(self) {
+            if ts[i].topics.is_empty() && ts[i].cond.conditional().eval(self) {
+                self.current_event = None;
                 return Some(&ts[i]);
             }
         }
-        None
+        match self.events.pop() {
+            Some(ev) => {
+                for i in 0..ts.len() {
+                    if ts[i].topics.contains(&ev.topic) && ts[i].cond.conditional().eval(self) {
+                        self.current_event = Some(ev);
+                        return Some(&ts[i]);
+                    }
+                }
+                None
+            }
+            None => None,
+        }
     }
 }
 
@@ -603,14 +616,14 @@ impl Actionable for Log {
 }
 
 #[derive(Debug, PartialEq, Clone, Builder)]
-pub struct Send {
+pub struct Raise {
     #[builder(setter(into))]
     topic: String,
     #[builder(default="Value::Object(HashMap::new())")]
     contents: Value,
 }
 
-impl Actionable for Send {
+impl Actionable for Raise {
     fn apply(&self, ctx: &mut Context) -> Result<(), Fault> {
         ctx.events.push(Event {
             topic: self.topic.clone(),
@@ -620,17 +633,59 @@ impl Actionable for Send {
     }
 }
 
+#[derive(Debug, PartialEq, Clone, Builder)]
+pub struct Assign {
+    #[builder(setter(into))]
+    key: String,
+    // TODO: make this an Expression
+    value: Value,
+}
+
+impl Actionable for Assign {
+    fn apply(&self, ctx: &mut Context) -> Result<(), Fault> {
+        // TODO: partial assignment into objects & lists
+        ctx.vars.insert(self.key.to_string(), self.value.clone());
+        Ok(())
+    }
+}
+
+#[derive(Debug, PartialEq, Clone, Builder)]
+pub struct Choose {
+    #[builder(default="vec![]")]
+    when: Vec<(Condition, Box<Action>)>,
+    #[builder(default="None")]
+    otherwise: Option<Box<Action>>,
+}
+
+impl Actionable for Choose {
+    fn apply(&self, ctx: &mut Context) -> Result<(), Fault> {
+        for &(ref cond, ref action) in &self.when {
+            if cond.conditional().eval(ctx) {
+                return action.actionable().apply(ctx);
+            }
+        }
+        if let &Some(ref action) = &self.otherwise {
+            return action.actionable().apply(ctx);
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub enum Action {
     Log(Log),
-    Send(Send),
+    Raise(Raise),
+    Assign(Assign),
+    Choose(Choose),
 }
 
 impl Action {
     fn actionable(&self) -> &Actionable {
         match self {
             &Action::Log(ref a) => a,
-            &Action::Send(ref s) => s,
+            &Action::Raise(ref s) => s,
+            &Action::Assign(ref a) => a,
+            &Action::Choose(ref c) => c,
         }
     }
 }
@@ -648,15 +703,47 @@ impl Conditional for True {
     }
 }
 
+#[derive(Clone)]
+pub struct CondFn {
+    f: Rc<Fn(&Context) -> bool>,
+}
+
+impl std::fmt::Debug for CondFn {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+        write!(f, "(CondFn")
+    }
+}
+
+impl PartialEq for CondFn {
+    fn eq(&self, _: &Self) -> bool {
+        return false;
+    }
+}
+
+impl Conditional for CondFn {
+    fn eval(&self, ctx: &Context) -> bool {
+        (self.f)(ctx)
+    }
+}
+
+impl CondFn {
+    pub fn new(f: Rc<Fn(&Context) -> bool>) -> CondFn {
+        CondFn { f: f }
+    }
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub enum Condition {
     True(True),
+    Fn(CondFn), /* TODO:
+                 * Expression(Expression), */
 }
 
 impl Condition {
     pub fn conditional(&self) -> &Conditional {
         match self {
             &Condition::True(ref c) => c,
+            &Condition::Fn(ref f) => f,
         }
     }
 }
@@ -677,12 +764,29 @@ impl Outputable for Empty {
 #[derive(Debug, PartialEq, Clone)]
 pub enum Output {
     Empty(Empty),
+    ValueOf(ValueOf),
+}
+
+#[derive(Debug, PartialEq, Clone, Builder)]
+pub struct ValueOf {
+    #[builder(setter(into))]
+    key: String,
+}
+
+impl Outputable for ValueOf {
+    fn eval(&self, ctx: &Context) -> Value {
+        match ctx.vars.get(&self.key) {
+            Some(v) => v.clone(),
+            None => Value::None,
+        }
+    }
 }
 
 impl Output {
     pub fn outputable(&self) -> &Outputable {
         match self {
             &Output::Empty(ref o) => o,
+            &Output::ValueOf(ref v) => v,
         }
     }
 }
@@ -696,18 +800,34 @@ pub enum Value {
     String(String),
     List(Vec<Value>),
     Object(HashMap<String, Value>),
+    None,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Event {
     topic: String,
     contents: Value,
 }
 
+#[derive(Debug)]
+pub struct EventQueue(Vec<Event>);
+
+impl EventQueue {
+    pub fn new() -> EventQueue {
+        EventQueue(vec![])
+    }
+    pub fn push(&mut self, ev: Event) {
+        self.0.insert(0, ev)
+    }
+    pub fn pop(&mut self) -> Option<Event> {
+        self.0.pop()
+    }
+}
+
 #[derive(Debug, PartialEq, Clone, Builder)]
 pub struct Transition {
-    #[builder(default="vec![]")]
-    topics: Vec<String>,
+    #[builder(default="HashSet::new()")]
+    topics: HashSet<String>,
     #[builder(default="Condition::True(True)")]
     cond: Condition,
     #[builder(default="vec![]")]
