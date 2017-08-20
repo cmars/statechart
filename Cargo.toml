@@ -6,7 +6,11 @@ version = "0.0.3"
 documentation = "https://docs.rs/statechart"
 repository = "https://github.com/cmars/statechart"
 authors = ["Casey Marshall <github@cmars.tech>"]
-keywords = ["statechart", "hierarchical", "state", "machine"]
+keywords = ["statechart", "state-machine", "reactive", "event-driven"]
+readme = "README.md"
+
+[badges]
+travis-ci = { repository = "cmars/statechart" }
 
 [dependencies]
 derive_builder = "0.5.0"
