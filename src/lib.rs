@@ -123,7 +123,7 @@ macro_rules! states {
 #[macro_export]
 macro_rules! substates {
     ($($e:expr),*) => {
-        RefCell::new(vec![$(Rc::new($e)),*])
+        std::cell::RefCell::new(vec![$(std::rc::Rc::new($e)),*])
     }
 }
 

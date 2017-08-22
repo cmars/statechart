@@ -1,8 +1,5 @@
 #[cfg(test)]
 
-use std::cell::RefCell;
-use std::rc::Rc;
-
 extern crate statechart;
 use statechart::*;
 
