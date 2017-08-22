@@ -17,31 +17,16 @@ fn a_eq_x(x: i32) -> Rc<Fn(&Context) -> bool> {
 
 #[test]
 fn first_choice_only_match() {
-    let sc = State::Compound(CompoundBuilder::default()
-        .label("S")
-        .substates(RefCell::new(vec![Rc::new(State::Atomic(AtomicBuilder::default()
-                                         .label("S0")
-                                         .transitions(vec![TransitionBuilder::default()
-                                                  .target_label(Some("SF".to_string()))
-                                                  .build()
-                                                  .unwrap()])
-                                         .on_entry(vec![Action::Assign(AssignBuilder::default()
-                                                            .key("a")
-                                                            .value(Value::Int(1))
-                                                            .build()
-                                                            .unwrap())])
-                                         .on_exit(vec![Action::Choose(ChooseBuilder::default().when(vec![
-                                            (Condition::Fn(CondFn::new(a_eq_x(1))), Box::new(Action::Assign(
-                                                    AssignBuilder::default().key("b").value(
-                                                        Value::String("matched".to_string())).build().unwrap())))
-                                            ]).build().unwrap())]).build().unwrap())),
-                                    Rc::new(State::Final(FinalBuilder::default()
-                                         .label("SF")
-                                         .result(Output::ValueOf(ValueOfBuilder::default().key("b").build().unwrap()))
-                                         .build()
-                                         .unwrap()))]))
-        .build()
-        .unwrap());
+    let sc = states!("S", substates: substates!(
+        state!("S0",
+            transitions: vec![goto!(target_label: Some("SF".to_string()))],
+            on_entry: vec![action_assign!(key: "a", value: Value::Int(1))],
+            on_exit: vec![action_choose!(when: vec![
+                (cond_fn!(a_eq_x(1)),
+                    Box::new(action_assign!(key: "b",
+                        value: Value::String("matched".to_string()))))])]),
+        final_state!("SF",
+            result: Output::ValueOf(ValueOfBuilder::default().key("b").build().unwrap()))));
     let mut ctx = Context::new(sc);
     let result = ctx.run();
     assert!(result.is_ok(), "fault: {:?}", result.err().unwrap());
@@ -50,37 +35,18 @@ fn first_choice_only_match() {
 
 #[test]
 fn last_match() {
-    let sc = State::Compound(CompoundBuilder::default()
-        .label("S")
-        .substates(RefCell::new(vec![Rc::new(State::Atomic(AtomicBuilder::default()
-                                         .label("S0")
-                                         .transitions(vec![TransitionBuilder::default()
-                                                  .target_label(Some("SF".to_string()))
-                                                  .build()
-                                                  .unwrap()])
-                                         .on_entry(vec![Action::Assign(AssignBuilder::default()
-                                                            .key("a")
-                                                            .value(Value::Int(2))
-                                                            .build()
-                                                            .unwrap())])
-                                         .on_exit(vec![
-                                         Action::Choose(ChooseBuilder::default().when(vec![
-                                            (Condition::Fn(CondFn::new(a_eq_x(1))), Box::new(Action::Assign(
-                                                    AssignBuilder::default().key("b").value(
-                                                        Value::String("not matched".to_string())).build().unwrap()))),
-                                            (Condition::Fn(CondFn::new(a_eq_x(2))), Box::new(Action::Assign(
-                                                    AssignBuilder::default().key("b").value(
-                                                        Value::String("matched".to_string())).build().unwrap()))),
-                                            ]).build().unwrap()),
-                                        ]).build().unwrap())),
-                                    Rc::new(State::Final(FinalBuilder::default()
-                                         .label("SF")
-                                         .result(Output::ValueOf(ValueOfBuilder::default().key("b").build().unwrap()))
-                                         .build()
-                                         .unwrap())),
-                                         ]))
-        .build()
-        .unwrap());
+    let sc = states!("S", substates: substates!(
+        state!("S0",
+            transitions: vec![goto!(target_label: Some("SF".to_string()))],
+            on_entry: vec![action_assign!(key: "a", value: Value::Int(2))],
+            on_exit: vec![action_choose!(when: vec![
+                (cond_fn!(a_eq_x(1)), Box::new(action_assign!(
+                    key: "b", value: Value::String("not matched".to_string())))),
+                (cond_fn!(a_eq_x(2)), Box::new(action_assign!(
+                    key: "b", value: Value::String("matched".to_string())))),
+            ])]),
+        final_state!("SF",
+            result: Output::ValueOf(ValueOfBuilder::default().key("b").build().unwrap()))));
     let mut ctx = Context::new(sc);
     let result = ctx.run();
     assert!(result.is_ok(), "fault: {:?}", result.err().unwrap());
@@ -89,35 +55,20 @@ fn last_match() {
 
 #[test]
 fn otherwise() {
-    let sc = State::Compound(CompoundBuilder::default()
-        .label("S")
-        .substates(RefCell::new(vec![Rc::new(State::Atomic(AtomicBuilder::default()
-                                         .label("S0")
-                                         .transitions(vec![TransitionBuilder::default()
-                                                  .target_label(Some("SF".to_string()))
-                                                  .build()
-                                                  .unwrap()])
-                                         .on_exit(vec![
-                                         Action::Choose(ChooseBuilder::default().when(vec![
-                                            (Condition::Fn(CondFn::new(a_eq_x(1))), Box::new(Action::Assign(
-                                                    AssignBuilder::default().key("b").value(
-                                                        Value::String("not matched".to_string())).build().unwrap()))),
-                                            (Condition::Fn(CondFn::new(a_eq_x(2))), Box::new(Action::Assign(
-                                                    AssignBuilder::default().key("b").value(
-                                                        Value::String("not matched".to_string())).build().unwrap()))),
-                                            ]).otherwise(Some(Box::new(Action::Assign(
-                                                    AssignBuilder::default().key("b").value(
-                                                        Value::String("matched".to_string())).build().unwrap()))))
-                                            .build().unwrap()),
-                                        ]).build().unwrap())),
-                                    Rc::new(State::Final(FinalBuilder::default()
-                                         .label("SF")
-                                         .result(Output::ValueOf(ValueOfBuilder::default().key("b").build().unwrap()))
-                                         .build()
-                                         .unwrap())),
-                                         ]))
-        .build()
-        .unwrap());
+    let sc = states!("S", substates: substates!(
+        state!("S0",
+            transitions: vec![goto!(target_label: Some("SF".to_string()))],
+            on_exit: vec![action_choose!(
+                when: vec![
+                    (cond_fn!(a_eq_x(1)), Box::new(action_assign!(
+                        key: "b", value: Value::String("not matched".to_string())))),
+                    (cond_fn!(a_eq_x(2)), Box::new(action_assign!(
+                        key: "b", value: Value::String("not matched".to_string())))),
+                ],
+                otherwise: Some(Box::new(action_assign!(
+                    key: "b", value: Value::String("matched".to_string())))))]),
+        final_state!("SF",
+            result: Output::ValueOf(ValueOfBuilder::default().key("b").build().unwrap()))));
     let mut ctx = Context::new(sc);
     let result = ctx.run();
     assert!(result.is_ok(), "fault: {:?}", result.err().unwrap());

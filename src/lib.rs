@@ -41,6 +41,13 @@ pub struct Atomic {
     parent: Weak<State>,
 }
 
+#[macro_export]
+macro_rules! state {
+    ($label:expr, $($key:ident: $value:expr),*) => {
+        State::Atomic(AtomicBuilder::default().label($label)$(.$key($value))*.build().unwrap())
+    }
+}
+
 impl PartialEq for Atomic {
     fn eq(&self, other: &Self) -> bool {
         (&self.id, &self.label, &self.on_entry, &self.on_exit, &self.transitions) ==
@@ -104,6 +111,20 @@ pub struct Compound {
     substates: RefCell<Vec<Rc<State>>>,
     #[builder(setter(skip))]
     parent: Weak<State>,
+}
+
+#[macro_export]
+macro_rules! states {
+    ($label:expr, $($key:ident: $value:expr),*) => {
+        State::Compound(CompoundBuilder::default().label($label)$(.$key($value))*.build().unwrap())
+    }
+}
+
+#[macro_export]
+macro_rules! substates {
+    ($($e:expr),*) => {
+        RefCell::new(vec![$(Rc::new($e)),*])
+    }
 }
 
 impl PartialEq for Compound {
@@ -197,6 +218,13 @@ pub struct Parallel {
     parent: Weak<State>,
 }
 
+#[macro_export]
+macro_rules! parallel {
+    ($label:expr, $($key:ident: $value:expr),*) => {
+        State::Parallel(ParallelBuilder::default().label($label)$(.$key($value))*.build().unwrap())
+    }
+}
+
 impl PartialEq for Parallel {
     fn eq(&self, other: &Self) -> bool {
         (&self.id,
@@ -272,6 +300,13 @@ pub struct Final {
     result: Output,
     #[builder(setter(skip))]
     parent: Weak<State>,
+}
+
+#[macro_export]
+macro_rules! final_state {
+    ($label:expr, $($key:ident: $value:expr),*) => {
+        State::Final(FinalBuilder::default().label($label)$(.$key($value))*.build().unwrap())
+    }
 }
 
 impl PartialEq for Final {
@@ -605,6 +640,13 @@ pub struct Log {
     message: String,
 }
 
+#[macro_export]
+macro_rules! action_log {
+    ($($key:ident: $value:expr),*) => {
+        Action::Log(LogBuilder::default()$(.$key($value))*.build().unwrap())
+    }
+}
+
 impl Actionable for Log {
     fn apply(&self, _: &mut Context) -> Result<(), Fault> {
         println!("[{}]{}: {}",
@@ -621,6 +663,13 @@ pub struct Raise {
     topic: String,
     #[builder(default="Value::Object(HashMap::new())")]
     contents: Value,
+}
+
+#[macro_export]
+macro_rules! action_raise {
+    ($($key:ident: $value:expr),*) => {
+        Action::Raise(RaiseBuilder::default()$(.$key($value))*.build().unwrap())
+    }
 }
 
 impl Actionable for Raise {
@@ -641,6 +690,13 @@ pub struct Assign {
     value: Value,
 }
 
+#[macro_export]
+macro_rules! action_assign {
+    ($($key:ident: $value:expr),*) => {
+        Action::Assign(AssignBuilder::default()$(.$key($value))*.build().unwrap())
+    }
+}
+
 impl Actionable for Assign {
     fn apply(&self, ctx: &mut Context) -> Result<(), Fault> {
         // TODO: partial assignment into objects & lists
@@ -657,6 +713,13 @@ pub struct Choose {
     otherwise: Option<Box<Action>>,
 }
 
+#[macro_export]
+macro_rules! action_choose {
+    ($($key:ident: $value:expr),*) => {
+        Action::Choose(ChooseBuilder::default()$(.$key($value))*.build().unwrap())
+    }
+}
+
 impl Actionable for Choose {
     fn apply(&self, ctx: &mut Context) -> Result<(), Fault> {
         for &(ref cond, ref action) in &self.when {
@@ -671,12 +734,49 @@ impl Actionable for Choose {
     }
 }
 
+#[derive(Clone)]
+pub struct ActionFn {
+    f: Rc<Fn(&mut Context) -> Result<(), Fault>>,
+}
+
+#[macro_export]
+macro_rules! action_fn {
+    ($f:expr) => {
+        Action::Fn(ActionFn::new($f))
+    }
+}
+
+impl std::fmt::Debug for ActionFn {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+        write!(f, "(ActionFn)")
+    }
+}
+
+impl PartialEq for ActionFn {
+    fn eq(&self, _: &Self) -> bool {
+        return false;
+    }
+}
+
+impl Actionable for ActionFn {
+    fn apply(&self, ctx: &mut Context) -> Result<(), Fault> {
+        (self.f)(ctx)
+    }
+}
+
+impl ActionFn {
+    pub fn new(f: Rc<Fn(&mut Context) -> Result<(), Fault>>) -> ActionFn {
+        ActionFn { f: f }
+    }
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub enum Action {
     Log(Log),
     Raise(Raise),
     Assign(Assign),
     Choose(Choose),
+    Fn(ActionFn),
 }
 
 impl Action {
@@ -686,6 +786,7 @@ impl Action {
             &Action::Raise(ref s) => s,
             &Action::Assign(ref a) => a,
             &Action::Choose(ref c) => c,
+            &Action::Fn(ref f) => f,
         }
     }
 }
@@ -708,9 +809,16 @@ pub struct CondFn {
     f: Rc<Fn(&Context) -> bool>,
 }
 
+#[macro_export]
+macro_rules! cond_fn {
+    ($f:expr) => {
+        Condition::Fn(CondFn::new($f))
+    }
+}
+
 impl std::fmt::Debug for CondFn {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
-        write!(f, "(CondFn")
+        write!(f, "(CondFn)")
     }
 }
 
@@ -834,4 +942,11 @@ pub struct Transition {
     actions: Vec<Action>,
     #[builder(default="None")]
     target_label: Option<StateLabel>,
+}
+
+#[macro_export]
+macro_rules! goto {
+    ($($key:ident: $value:expr),*) => {
+        TransitionBuilder::default()$(.$key($value))*.build().unwrap()
+    }
 }
