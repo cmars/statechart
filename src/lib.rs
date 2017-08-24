@@ -1,5 +1,7 @@
 #[macro_use]
 extern crate derive_builder;
+#[macro_use]
+extern crate log;
 
 extern crate chrono;
 
@@ -446,6 +448,7 @@ pub enum Fault {
     LabelNotFound(StateLabel),
     IDNotFound(StateID),
     CurrentStateUndefined,
+    ActionError(String),
 }
 
 impl Context {
@@ -493,6 +496,9 @@ impl Context {
     pub fn get_var(&self, key: &str) -> Option<&Value> {
         self.vars.get(key)
     }
+    pub fn set_var(&mut self, key: &str, value: Value) {
+        self.vars.insert(key.to_string(), value);
+    }
     fn current_config(&self) -> Result<Rc<State>, Fault> {
         match self.current_config.upgrade() {
             Some(r) => Ok(r),
@@ -524,6 +530,7 @@ impl Context {
         }
     }
     pub fn enter_state(&mut self, t: &Transition) -> Result<(), Fault> {
+        trace!("enter_state: {:?}", t);
         match t.target_label {
             None => {
                 // Execute actions in the current transition and that's it.
@@ -610,16 +617,23 @@ impl Context {
         for i in 0..ts.len() {
             if ts[i].topics.is_empty() && ts[i].cond.conditional().eval(self) {
                 self.current_event = None;
+                trace!("matched empty topics, cond: {:?}", ts[i]);
                 return Some(&ts[i]);
             }
         }
+        trace!("events: {:?}, current_event: {:?}",
+               self.events,
+               self.current_event);
         match self.events.pop() {
             Some(ev) => {
                 for i in 0..ts.len() {
+                    trace!("checking {:?}", ts[i]);
                     if ts[i].topics.contains(&ev.topic) && ts[i].cond.conditional().eval(self) {
+                        trace!("matched topic {:?}, cond: {:?}", &ev.topic, ts[i]);
                         self.current_event = Some(ev);
                         return Some(&ts[i]);
                     }
+                    trace!("nope: topic was {:?} transition {:?}", &ev.topic, ts[i]);
                 }
                 None
             }
@@ -649,10 +663,10 @@ macro_rules! action_log {
 
 impl Actionable for Log {
     fn apply(&self, _: &mut Context) -> Result<(), Fault> {
-        println!("[{}]{}: {}",
-                 chrono::prelude::Utc::now().format("%Y-%m-%d %H:%M:%S"),
-                 self.label,
-                 self.message);
+        trace!("[{}]{}: {}",
+               chrono::prelude::Utc::now().format("%Y-%m-%d %H:%M:%S"),
+               self.label,
+               self.message);
         Ok(())
     }
 }
@@ -674,6 +688,7 @@ macro_rules! action_raise {
 
 impl Actionable for Raise {
     fn apply(&self, ctx: &mut Context) -> Result<(), Fault> {
+        trace!("raise {:?}", self);
         ctx.events.push(Event {
             topic: self.topic.clone(),
             contents: self.contents.clone(),
