@@ -1,10 +1,12 @@
 #[cfg(test)]
 
+extern crate env_logger;
 extern crate statechart;
 use statechart::*;
 
 #[test]
 fn assign_string() {
+    let _ = env_logger::init();
     let sc = states!("S", substates: substates!(
         state!("S1",
             transitions: vec![goto!(target_label: Some("S2".to_string()))],

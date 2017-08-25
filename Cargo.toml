@@ -2,7 +2,7 @@
 name = "statechart"
 description = "statecharts: hierarchical, reactive state machines"
 license = "MIT"
-version = "0.0.4"
+version = "0.0.5"
 documentation = "https://docs.rs/statechart"
 repository = "https://github.com/cmars/statechart"
 authors = ["Casey Marshall <github@cmars.tech>"]
@@ -16,4 +16,5 @@ travis-ci = { repository = "cmars/statechart" }
 chrono = "0.4.0"
 derive_builder = "0.5.0"
 env_logger = "0.4.3"
+futures = "0.1"
 log = "0.3.8"

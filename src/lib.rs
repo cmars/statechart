@@ -3,11 +3,11 @@ extern crate derive_builder;
 #[macro_use]
 extern crate log;
 
-extern crate chrono;
-
 use std::cell::{RefCell, RefMut, Ref};
 use std::collections::{HashMap, HashSet};
 use std::rc::{Rc, Weak};
+
+extern crate chrono;
 
 pub type StateID = Vec<usize>;
 
@@ -439,16 +439,26 @@ pub struct Context {
     state_by_id: HashMap<StateID, Weak<State>>,
     state_by_label: HashMap<StateLabel, Weak<State>>,
 
+    status: Status,
     current_config: Weak<State>,
     current_event: Option<Event>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone)]
+pub enum Status {
+    New,
+    Runnable,
+    Blocked,
+    Done(Value),
+}
+
+#[derive(Debug, PartialEq)]
 pub enum Fault {
     LabelNotFound(StateLabel),
     IDNotFound(StateID),
     CurrentStateUndefined,
     ActionError(String),
+    BlockedIndefinitely,
 }
 
 impl Context {
@@ -463,6 +473,7 @@ impl Context {
             events: EventQueue::new(),
             state_by_id: HashMap::new(),
             state_by_label: HashMap::new(),
+            status: Status::New,
             current_config: Weak::new(),
             current_event: None,
         };
@@ -506,38 +517,60 @@ impl Context {
         }
     }
     pub fn run(&mut self) -> Result<Value, Fault> {
-        let start_t = TransitionBuilder::default()
-            .target_label(Some(self.root.node().label().clone()))
-            .build()
-            .unwrap();
-        self.enter_state(&start_t)?;
         loop {
-            let current = self.current_config()?;
-            if let State::Final(ref f) = *current {
-                return Ok(f.result.outputable().eval(self));
-            }
-            if let Some(ref next_t) =
-                self.next_transition(current.active_node().unwrap().transitions()) {
-                self.enter_state(next_t)?;
-            } else if let Some(label) = current.node().initial() {
-                self.enter_state(&TransitionBuilder::default()
-                        .target_label(Some(label))
-                        .build()
-                        .unwrap())?;
-            } else {
-                panic!("help i'm stuck implement external events please!");
+            self.macrostep()?;
+            match self.status {
+                Status::Done(ref o) => return Ok(o.clone()),
+                Status::Blocked => return Err(Fault::BlockedIndefinitely),
+                _ => {}
             }
         }
     }
-    pub fn enter_state(&mut self, t: &Transition) -> Result<(), Fault> {
-        trace!("enter_state: {:?}", t);
+    pub fn macrostep(&mut self) -> Result<Status, Fault> {
+        match self.status {
+            Status::New => {
+                let start_t = TransitionBuilder::default()
+                    .target_label(Some(self.root.node().label().clone()))
+                    .build()
+                    .unwrap();
+                return match self.microstep(&start_t) {
+                    Ok(new_status) => {
+                        self.status = new_status.clone();
+                        Ok(new_status)
+                    }
+                    Err(e) => Err(e),
+                };
+            }
+            Status::Done(_) => Ok(self.status.clone()),
+            _ => {
+                let current = self.current_config()?;
+                trace!("macrostep: current={:?}", current);
+                if let State::Final(ref f) = *current {
+                    self.status = Status::Done(f.result.outputable().eval(self));
+                } else if let Some(ref next_t) =
+                    self.next_transition(current.active_node().unwrap().transitions()) {
+                    self.status = self.microstep(next_t)?;
+                } else if let Some(label) = current.node().initial() {
+                    self.status = self.microstep(&TransitionBuilder::default()
+                            .target_label(Some(label))
+                            .build()
+                            .unwrap())?;
+                } else {
+                    self.status = Status::Blocked
+                }
+                Ok(self.status.clone())
+            }
+        }
+    }
+    pub fn microstep(&mut self, t: &Transition) -> Result<Status, Fault> {
+        trace!("microstep: {:?}", t);
         match t.target_label {
             None => {
                 // Execute actions in the current transition and that's it.
                 for i in 0..t.actions.len() {
                     t.actions[i].actionable().apply(self)?;
                 }
-                Ok(())
+                Ok(Status::Runnable)
             }
             Some(ref target_label) => {
                 let target_st = match self.state(target_label) {
@@ -575,7 +608,7 @@ impl Context {
                     }
                 }
                 self.current_config = Rc::downgrade(&target_st);
-                Ok(())
+                Ok(Status::Runnable)
             }
         }
     }
@@ -965,3 +998,5 @@ macro_rules! goto {
         TransitionBuilder::default()$(.$key($value))*.build().unwrap()
     }
 }
+
+pub mod agent;

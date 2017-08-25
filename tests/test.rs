@@ -6,9 +6,11 @@ extern crate statechart;
 use statechart::*;
 
 #[test]
-fn hello_world() {
-    let st = state!("S", on_entry: vec![action_log!(message: "hello world")]);
-    println!("{:?}", st);
+fn blocked_indefinitely() {
+    let st = state!("S",);
+    let mut ctx = Context::new(st);
+    let result = ctx.run();
+    assert_eq!(result, Err(Fault::BlockedIndefinitely));
 }
 
 #[test]

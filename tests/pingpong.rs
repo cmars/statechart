@@ -51,8 +51,8 @@ fn pingpong() {
                         target_label: Some("ping".to_string()),
                         actions: vec![action_raise!(topic: "ping")])],
                 on_entry: vec![action_log!(message: "pong!")]),
-        final_state!("end",
-            result: Output::ValueOf(ValueOfBuilder::default().key("i").build().unwrap()))));
+            final_state!("end",
+                result: Output::ValueOf(ValueOfBuilder::default().key("i").build().unwrap()))));
     let mut ctx = Context::new(sc);
     let result = ctx.run();
     assert!(result.is_ok(), "fault: {:?}", result.err().unwrap());
