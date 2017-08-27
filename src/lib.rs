@@ -43,13 +43,6 @@ pub struct Atomic {
     parent: Weak<State>,
 }
 
-#[macro_export]
-macro_rules! state {
-    ($label:expr, $($key:ident: $value:expr),*) => {
-        State::Atomic(AtomicBuilder::default().label($label)$(.$key($value))*.build().unwrap())
-    }
-}
-
 impl PartialEq for Atomic {
     fn eq(&self, other: &Self) -> bool {
         (&self.id, &self.label, &self.on_entry, &self.on_exit, &self.transitions) ==
@@ -113,20 +106,6 @@ pub struct Compound {
     substates: RefCell<Vec<Rc<State>>>,
     #[builder(setter(skip))]
     parent: Weak<State>,
-}
-
-#[macro_export]
-macro_rules! states {
-    ($label:expr, $($key:ident: $value:expr),*) => {
-        State::Compound(CompoundBuilder::default().label($label)$(.$key($value))*.build().unwrap())
-    }
-}
-
-#[macro_export]
-macro_rules! substates {
-    ($($e:expr),*) => {
-        std::cell::RefCell::new(vec![$(std::rc::Rc::new($e)),*])
-    }
 }
 
 impl PartialEq for Compound {
@@ -220,13 +199,6 @@ pub struct Parallel {
     parent: Weak<State>,
 }
 
-#[macro_export]
-macro_rules! parallel {
-    ($label:expr, $($key:ident: $value:expr),*) => {
-        State::Parallel(ParallelBuilder::default().label($label)$(.$key($value))*.build().unwrap())
-    }
-}
-
 impl PartialEq for Parallel {
     fn eq(&self, other: &Self) -> bool {
         (&self.id,
@@ -302,13 +274,6 @@ pub struct Final {
     result: Output,
     #[builder(setter(skip))]
     parent: Weak<State>,
-}
-
-#[macro_export]
-macro_rules! final_state {
-    ($label:expr, $($key:ident: $value:expr),*) => {
-        State::Final(FinalBuilder::default().label($label)$(.$key($value))*.build().unwrap())
-    }
 }
 
 impl PartialEq for Final {
@@ -1000,3 +965,75 @@ macro_rules! goto {
 }
 
 pub mod agent;
+
+#[macro_export]
+macro_rules! state {
+    ($label:ident {$($tail:tt)*}) => {{
+       let mut stb = AtomicBuilder::default();
+       stb.label(stringify!($label));
+       state_props!(stb {$($tail)*});
+       State::Atomic(stb.build().unwrap())
+    }}
+}
+
+#[macro_export]
+macro_rules! states {
+    ($label:ident {$($tail:tt)*}) => {{
+        let mut stb = CompoundBuilder::default();
+        stb.label(stringify!($label));
+        state_props!(stb {$($tail)*});
+        State::Compound(stb.build().unwrap())
+    }}
+}
+
+#[macro_export]
+macro_rules! parallel {
+    ($label:ident {$($tail:tt)*}) => {{
+        let mut stb = ParallelBuilder::default();
+        stb.label(stringify!($label));
+        state_props!(stb {$($tail)*});
+        State::Parallel(stb.build().unwrap())
+    }}
+}
+
+#[macro_export]
+macro_rules! final_state {
+    ($label:ident {$($tail:tt)*}) => {{
+        let mut stb = FinalBuilder::default();
+        stb.label(stringify!($label));
+        state_props!(stb {$($tail)*});
+        State::Final(stb.build().unwrap())
+    }}
+}
+
+#[macro_export]
+macro_rules! state_props {
+    ($stb:ident {$key:ident: $value:expr}) => {
+        state_prop!($stb, $key, $value);
+    };
+    ($stb:ident {$key:ident: $value:expr, $($tail:tt)*}) => {
+        state_prop!($stb, $key, $value);
+        state_props!($stb {$($tail)*});
+    };
+    ($stb:ident {}) => {}
+}
+
+#[macro_export]
+macro_rules! state_prop {
+    ($stb:ident, substates, $value:expr) => {
+        $stb.substates(std::cell::RefCell::new(
+            $value.iter().map(|x|{std::rc::Rc::new(x.clone())}).collect()));
+    };
+    ($stb:ident, on_entry, $value:expr) => {
+        $stb.on_entry($value.iter().cloned().collect());
+    };
+    ($stb:ident, on_exit, $value:expr) => {
+        $stb.on_exit($value.iter().cloned().collect());
+    };
+    ($stb:ident, transitions, $value:expr) => {
+        $stb.transitions($value.iter().cloned().collect());
+    };
+    ($stb:ident, $key:ident, $value:expr) => {
+        $stb.$key($value);
+    }
+}

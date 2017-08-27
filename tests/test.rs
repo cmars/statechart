@@ -7,7 +7,7 @@ use statechart::*;
 
 #[test]
 fn blocked_indefinitely() {
-    let st = state!("S",);
+    let st = state!{ S {} };
     let mut ctx = Context::new(st);
     let result = ctx.run();
     assert_eq!(result, Err(Fault::BlockedIndefinitely));
@@ -39,14 +39,19 @@ fn context() {
 }
 
 fn c123() -> State {
-    states!("S", substates: substates!(
-        state!("S1",
-            transitions: vec![goto!(target_label: Some("S2".to_string()))],
-            on_entry: vec![action_log!(message: "hello s1")]),
-        state!("S2",
-            transitions: vec![goto!(target_label: Some("S3".to_string()))],
-            on_entry: vec![action_log!(message: "hello s2")]),
-        final_state!("S3",
-            on_entry: vec![action_log!(message: "hello s3")],
-            on_exit: vec![action_log!(message: "and goodbye now")])))
+    states!{ S {
+        substates: [
+            state!{ S1 {
+                transitions: [goto!(target_label: Some("S2".to_string()))],
+                on_entry: [action_log!(message: "hello s1")],
+            }},
+            state!{ S2 {
+                transitions: [goto!(target_label: Some("S3".to_string()))],
+                on_entry: [action_log!(message: "hello s2")],
+            }},
+            final_state!{ S3 {
+                on_entry: [action_log!(message: "hello s3")],
+                on_exit: [action_log!(message: "and goodbye now")],
+            }},
+        ]}}
 }
