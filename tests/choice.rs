@@ -65,8 +65,8 @@ fn otherwise() {
     let sc = states!{ S {
         substates: [
             state!{ S0 {
-                transitions: vec![goto!(target: SF)],
-                on_exit: vec![action_choose!(
+                transitions: [goto!(target: SF)],
+                on_exit: [action_choose!(
                     when: vec![
                         (a_eq_x(1), Box::new(action_assign!(
                             key: "b", value: Value::String("not matched".to_string())))),
