@@ -957,13 +957,6 @@ pub struct Transition {
     target_label: Option<StateLabel>,
 }
 
-#[macro_export]
-macro_rules! goto {
-    ($($key:ident: $value:expr),*) => {
-        TransitionBuilder::default()$(.$key($value))*.build().unwrap()
-    }
-}
-
 pub mod agent;
 
 #[macro_export]
@@ -1036,4 +1029,38 @@ macro_rules! state_prop {
     ($stb:ident, $key:ident, $value:expr) => {
         $stb.$key($value);
     }
+}
+
+#[macro_export]
+macro_rules! goto {
+    (@props $t:ident, $key:ident: $value:expr) => {
+        goto!{@prop $t, $key, $value};
+    };
+    (@props $t:ident, $key:ident: $value:expr, $($tail:tt)*) => {
+        goto!{@prop $t, $key, $value};
+        goto!{@props $t, $($tail)*};
+    };
+    (@prop $t:ident, target, $value:ident) => {
+        $t.target_label(Some(stringify!($value).to_string()));
+    };
+    (@prop $t:ident, topics, $value:expr) => {
+        $t.topics($value.iter().map(|x|{x.to_string()}).collect());
+    };
+    (@prop $t:ident, actions, $value:expr) => {
+        $t.actions($value.iter().cloned().collect());
+    };
+    (@prop $t:ident, $key:ident, $value:expr) => {
+        $t.$key($value);
+    };
+    ($key:ident: $value:tt) => {{
+        let mut t = TransitionBuilder::default();
+        goto!{@prop t, $key, $value};
+        t.build().unwrap()
+    }};
+    ($key:ident: $value:tt, $($tail:tt)*) => {{
+        let mut t = TransitionBuilder::default();
+        goto!{@prop t, $key, $value};
+        goto!{@props t, $($tail)*};
+        t.build().unwrap()
+    }};
 }

@@ -10,7 +10,7 @@ fn assign_string() {
     let sc = states!{ S {
         substates: [
             state!{ S1 {
-                transitions: [goto!(target_label: Some("S2".to_string()))],
+                transitions: [goto!(target: S2)],
                 on_entry: [action_assign!(key: "hello", value: Value::String("assign".to_string()))],
             }},
             final_state!{ S2 {

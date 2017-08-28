@@ -25,6 +25,17 @@ fn transitions() {
 }
 
 #[test]
+fn goto() {
+    let g = goto!(target: S1, topics: ["foo", "bar", "baz"]);
+    assert_eq!(g,
+               TransitionBuilder::default()
+                   .target_label(Some("S1".to_string()))
+                   .topics(["foo", "bar", "baz"].iter().map(|x| x.to_string()).collect())
+                   .build()
+                   .unwrap());
+}
+
+#[test]
 fn context() {
     let mut ctx = Context::new(c123());
     assert_eq!(ctx.state("S1").unwrap().node().label(), "S1");
@@ -42,11 +53,11 @@ fn c123() -> State {
     states!{ S {
         substates: [
             state!{ S1 {
-                transitions: [goto!(target_label: Some("S2".to_string()))],
+                transitions: [goto!(target: S2)],
                 on_entry: [action_log!(message: "hello s1")],
             }},
             state!{ S2 {
-                transitions: [goto!(target_label: Some("S3".to_string()))],
+                transitions: [goto!(target: S3)],
                 on_entry: [action_log!(message: "hello s2")],
             }},
             final_state!{ S3 {

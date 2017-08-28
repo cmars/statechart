@@ -19,7 +19,7 @@ fn first_choice_only_match() {
     let sc = states!{ S {
         substates: [
             state!{ S0 {
-                transitions: [goto!(target_label: Some("SF".to_string()))],
+                transitions: [goto!(target: SF)],
                 on_entry: [action_assign!(key: "a", value: Value::Int(1))],
                 on_exit: [action_choose!(when: vec![
                     (cond_fn!(a_eq_x(1)),
@@ -41,7 +41,7 @@ fn last_match() {
     let sc = states!{ S {
         substates: [
             state!{ S0 {
-                transitions: [goto!(target_label: Some("SF".to_string()))],
+                transitions: [goto!(target: SF)],
                 on_entry: [action_assign!(key: "a", value: Value::Int(2))],
                 on_exit: [action_choose!(when: vec![
                     (cond_fn!(a_eq_x(1)), Box::new(action_assign!(
@@ -65,7 +65,7 @@ fn otherwise() {
     let sc = states!{ S {
         substates: [
             state!{ S0 {
-                transitions: vec![goto!(target_label: Some("SF".to_string()))],
+                transitions: vec![goto!(target: SF)],
                 on_exit: vec![action_choose!(
                     when: vec![
                         (cond_fn!(a_eq_x(1)), Box::new(action_assign!(
