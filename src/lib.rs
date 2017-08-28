@@ -822,13 +822,6 @@ pub struct CondFn {
     f: Rc<Fn(&Context) -> bool>,
 }
 
-#[macro_export]
-macro_rules! cond_fn {
-    ($f:expr) => {
-        Condition::Fn(CondFn::new($f))
-    }
-}
-
 impl std::fmt::Debug for CondFn {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
         write!(f, "(CondFn)")
@@ -1063,4 +1056,11 @@ macro_rules! goto {
         goto!{@props t, $($tail)*};
         t.build().unwrap()
     }};
+}
+
+#[macro_export]
+macro_rules! cond_fn {
+    ($f:expr) => {
+        Condition::Fn(CondFn::new(Rc::new($f)))
+    }
 }

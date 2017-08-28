@@ -17,11 +17,11 @@ fn pingpong() {
             state!{ ping {
                 transitions: [
                     goto!(target: pong, topics: ["ping"],
-                        cond: cond_fn!(Rc::new(|ctx: &Context| {
+                        cond: cond_fn!(|ctx: &Context| {
                             match ctx.get_var("i") {
                                 Some(&Value::Int(i)) => i < 10,
                                 _ => false,
-                            }})),
+                            }}),
                         actions: [
                             action_raise!(topic: "pong"),
                             action_fn!(Rc::new(|ctx: &mut Context| {
@@ -34,12 +34,12 @@ fn pingpong() {
                                 Ok(())
                             }))]),
                     goto!(target: end,
-                        cond: cond_fn!(Rc::new(|ctx: &Context| {
+                        cond: cond_fn!(|ctx: &Context| {
                             match ctx.get_var("i") {
                                 Some(&Value::Int(i)) => i >= 10,
                                 _ => false,
                             }
-                        }))),
+                        })),
                 ],
                 on_entry: [action_log!(message: "ping!")],
             }},

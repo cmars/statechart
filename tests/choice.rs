@@ -5,8 +5,8 @@ use std::rc::Rc;
 extern crate statechart;
 use statechart::*;
 
-fn a_eq_x(x: i32) -> Rc<Fn(&Context) -> bool> {
-    Rc::new(move |ctx: &Context| -> bool {
+fn a_eq_x(x: i32) -> Condition {
+    cond_fn!(move |ctx: &Context| -> bool {
         match ctx.get_var("a") {
             Some(&Value::Int(n)) => n == x,
             _ => false,
@@ -22,7 +22,7 @@ fn first_choice_only_match() {
                 transitions: [goto!(target: SF)],
                 on_entry: [action_assign!(key: "a", value: Value::Int(1))],
                 on_exit: [action_choose!(when: vec![
-                    (cond_fn!(a_eq_x(1)),
+                    (a_eq_x(1),
                         Box::new(action_assign!(key: "b",
                             value: Value::String("matched".to_string()))))])],
             }},
@@ -44,9 +44,9 @@ fn last_match() {
                 transitions: [goto!(target: SF)],
                 on_entry: [action_assign!(key: "a", value: Value::Int(2))],
                 on_exit: [action_choose!(when: vec![
-                    (cond_fn!(a_eq_x(1)), Box::new(action_assign!(
+                    (a_eq_x(1), Box::new(action_assign!(
                         key: "b", value: Value::String("not matched".to_string())))),
-                    (cond_fn!(a_eq_x(2)), Box::new(action_assign!(
+                    (a_eq_x(2), Box::new(action_assign!(
                         key: "b", value: Value::String("matched".to_string())))),
                 ])],
             }},
@@ -68,9 +68,9 @@ fn otherwise() {
                 transitions: vec![goto!(target: SF)],
                 on_exit: vec![action_choose!(
                     when: vec![
-                        (cond_fn!(a_eq_x(1)), Box::new(action_assign!(
+                        (a_eq_x(1), Box::new(action_assign!(
                             key: "b", value: Value::String("not matched".to_string())))),
-                        (cond_fn!(a_eq_x(2)), Box::new(action_assign!(
+                        (a_eq_x(2), Box::new(action_assign!(
                             key: "b", value: Value::String("not matched".to_string())))),
                     ],
                     otherwise: Some(Box::new(action_assign!(
