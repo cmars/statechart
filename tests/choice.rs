@@ -21,10 +21,9 @@ fn first_choice_only_match() {
             state!{ S0 {
                 transitions: [goto!(target: SF)],
                 on_entry: [action_assign!(key: "a", value: Value::Int(1))],
-                on_exit: [action_choose!(when: vec![
+                on_exit: [choose!(when: [
                     (a_eq_x(1),
-                        Box::new(action_assign!(key: "b",
-                            value: Value::String("matched".to_string()))))])],
+                        action_assign!(key: "b", value: Value::from_str("matched")))])]
             }},
             final_state!{ SF {
                 result: Output::ValueOf(ValueOfBuilder::default().key("b").build().unwrap()),
@@ -33,7 +32,7 @@ fn first_choice_only_match() {
     let mut ctx = Context::new(sc);
     let result = ctx.run();
     assert!(result.is_ok(), "fault: {:?}", result.err().unwrap());
-    assert_eq!(result.unwrap(), Value::String("matched".to_string()));
+    assert_eq!(result.unwrap(), Value::from_str("matched"));
 }
 
 #[test]
@@ -43,12 +42,11 @@ fn last_match() {
             state!{ S0 {
                 transitions: [goto!(target: SF)],
                 on_entry: [action_assign!(key: "a", value: Value::Int(2))],
-                on_exit: [action_choose!(when: vec![
-                    (a_eq_x(1), Box::new(action_assign!(
-                        key: "b", value: Value::String("not matched".to_string())))),
-                    (a_eq_x(2), Box::new(action_assign!(
-                        key: "b", value: Value::String("matched".to_string())))),
-                ])],
+                on_exit: [choose!(when: [
+                    (a_eq_x(1),
+                        action_assign!(key: "b", value: Value::from_str("not matched"))),
+                    (a_eq_x(2),
+                        action_assign!(key: "b", value: Value::from_str("matched")))])],
             }},
             final_state!{ SF {
                 result: Output::ValueOf(ValueOfBuilder::default().key("b").build().unwrap()),
@@ -57,7 +55,7 @@ fn last_match() {
     let mut ctx = Context::new(sc);
     let result = ctx.run();
     assert!(result.is_ok(), "fault: {:?}", result.err().unwrap());
-    assert_eq!(result.unwrap(), Value::String("matched".to_string()));
+    assert_eq!(result.unwrap(), Value::from_str("matched"));
 }
 
 #[test]
@@ -66,15 +64,12 @@ fn otherwise() {
         substates: [
             state!{ S0 {
                 transitions: [goto!(target: SF)],
-                on_exit: [action_choose!(
-                    when: vec![
-                        (a_eq_x(1), Box::new(action_assign!(
-                            key: "b", value: Value::String("not matched".to_string())))),
-                        (a_eq_x(2), Box::new(action_assign!(
-                            key: "b", value: Value::String("not matched".to_string())))),
-                    ],
-                    otherwise: Some(Box::new(action_assign!(
-                        key: "b", value: Value::String("matched".to_string())))))],
+                on_exit: [choose!(when: [
+                    (a_eq_x(1),
+                        action_assign!(key: "b", value: Value::from_str("not matched"))),
+                    (a_eq_x(2),
+                        action_assign!(key: "b", value: Value::from_str("not matched")))],
+                    otherwise: action_assign!(key: "b", value: Value::from_str("matched")))],
             }},
             final_state!{ SF {
                 result: Output::ValueOf(ValueOfBuilder::default().key("b").build().unwrap()),
@@ -83,5 +78,5 @@ fn otherwise() {
     let mut ctx = Context::new(sc);
     let result = ctx.run();
     assert!(result.is_ok(), "fault: {:?}", result.err().unwrap());
-    assert_eq!(result.unwrap(), Value::String("matched".to_string()));
+    assert_eq!(result.unwrap(), Value::from_str("matched"));
 }

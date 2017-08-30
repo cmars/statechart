@@ -726,13 +726,6 @@ pub struct Choose {
     otherwise: Option<Box<Action>>,
 }
 
-#[macro_export]
-macro_rules! action_choose {
-    ($($key:ident: $value:expr),*) => {
-        Action::Choose(ChooseBuilder::default()$(.$key($value))*.build().unwrap())
-    }
-}
-
 impl Actionable for Choose {
     fn apply(&self, ctx: &mut Context) -> Result<(), Fault> {
         for &(ref cond, ref action) in &self.when {
@@ -917,6 +910,14 @@ pub enum Value {
     None,
 }
 
+impl Value {
+    pub fn from_str<S>(s: S) -> Value
+        where S: Into<String>
+    {
+        Value::String(s.into())
+    }
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub struct Event {
     topic: String,
@@ -1063,4 +1064,33 @@ macro_rules! cond_fn {
     ($f:expr) => {
         Condition::Fn(CondFn::new(Rc::new($f)))
     }
+}
+
+#[macro_export]
+macro_rules! choose {
+    (@props $c:ident) => {};
+    (@props $c:ident, $key:ident: $value:expr) => {
+        choose!{@prop $c, $key, $value};
+    };
+    (@props $c:ident, $key:ident: $value:expr, $($tail:tt)*) => {
+        choose!{@prop $c, $key, $value};
+        choose!{@props $c $($tail)*};
+    };
+    (@prop $c:ident, otherwise, $value:expr) => {
+        $c.otherwise(Some(Box::new($value)));
+    };
+    (@prop $c:ident, when, $conds:expr) => {
+        $c.when($conds.iter().cloned().map(|(c, a)|{(c, Box::new(a))}).collect());
+    };
+    ($key:ident: $value:tt) => {{
+        let mut c = ChooseBuilder::default();
+        choose!{@prop c, $key, $value};
+        Action::Choose(c.build().unwrap())
+    }};
+    ($key:ident: $value:tt, $($tail:tt)*) => {{
+        let mut c = ChooseBuilder::default();
+        choose!{@prop c, $key, $value};
+        choose!{@props c, $($tail)*};
+        Action::Choose(c.build().unwrap())
+    }};
 }

@@ -11,7 +11,7 @@ fn assign_string() {
         substates: [
             state!{ S1 {
                 transitions: [goto!(target: S2)],
-                on_entry: [action_assign!(key: "hello", value: Value::String("assign".to_string()))],
+                on_entry: [action_assign!(key: "hello", value: Value::from_str("assign"))],
             }},
             final_state!{ S2 {
                 result: Output::ValueOf(ValueOfBuilder::default().key("hello").build().unwrap()),
@@ -20,5 +20,5 @@ fn assign_string() {
     let mut ctx = Context::new(sc);
     let result = ctx.run();
     assert!(result.is_ok(), "fault: {:?}", result.err().unwrap());
-    assert_eq!(result.unwrap(), Value::String("assign".to_string()));
+    assert_eq!(result.unwrap(), Value::from_str("assign"));
 }
