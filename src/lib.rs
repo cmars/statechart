@@ -182,85 +182,6 @@ impl Compound {
 }
 
 #[derive(Debug, Clone, Builder)]
-pub struct Parallel {
-    #[builder(default="vec![]")]
-    id: StateID,
-    #[builder(setter(into))]
-    label: StateLabel,
-    #[builder(default="vec![]")]
-    on_entry: Vec<Action>,
-    #[builder(default="vec![]")]
-    on_exit: Vec<Action>,
-    #[builder(default="vec![]")]
-    transitions: Vec<Transition>,
-    #[builder(default="RefCell::new(vec![])")]
-    substates: RefCell<Vec<Rc<State>>>,
-    #[builder(setter(skip))]
-    parent: Weak<State>,
-}
-
-impl PartialEq for Parallel {
-    fn eq(&self, other: &Self) -> bool {
-        (&self.id,
-         &self.label,
-         &self.on_entry,
-         &self.on_exit,
-         &self.transitions,
-         &self.substates) ==
-        (&other.id,
-         &other.label,
-         &other.on_entry,
-         &other.on_exit,
-         &other.transitions,
-         &other.substates)
-    }
-}
-
-impl Node for Parallel {
-    fn id(&self) -> &StateID {
-        &self.id
-    }
-    fn label(&self) -> &StateLabel {
-        &self.label
-    }
-    fn substate(&self, label: &str) -> Option<Rc<State>> {
-        let ss = self.substates.borrow();
-        for i in 0..ss.len() {
-            if ss[i].node().label() == label {
-                return Some(ss[i].clone());
-            }
-        }
-        None
-    }
-    fn initial(&self) -> Option<StateLabel> {
-        None
-    }
-    fn parent(&self) -> Weak<State> {
-        self.parent.clone()
-    }
-    fn on_entry(&self) -> &Vec<Action> {
-        &self.on_entry
-    }
-    fn on_exit(&self) -> &Vec<Action> {
-        &self.on_exit
-    }
-}
-impl ActiveNode for Parallel {
-    fn transitions(&self) -> &Vec<Transition> {
-        &self.transitions
-    }
-}
-
-impl Parallel {
-    pub fn node(&self) -> &Node {
-        self as &Node
-    }
-    pub fn active_node(&self) -> &ActiveNode {
-        self as &ActiveNode
-    }
-}
-
-#[derive(Debug, Clone, Builder)]
 pub struct Final {
     #[builder(default="vec![]")]
     id: StateID,
@@ -317,7 +238,6 @@ impl Final {
 pub enum State {
     Atomic(Atomic),
     Compound(Compound),
-    Parallel(Parallel),
     Final(Final),
 }
 
@@ -326,7 +246,6 @@ impl State {
         match self {
             &State::Atomic(ref a) => a.node(),
             &State::Compound(ref c) => c.node(),
-            &State::Parallel(ref p) => p.node(),
             &State::Final(ref f) => f.node(),
         }
     }
@@ -334,7 +253,6 @@ impl State {
         match self {
             &State::Atomic(ref a) => Some(a.active_node()),
             &State::Compound(ref c) => Some(c.active_node()),
-            &State::Parallel(ref p) => Some(p.active_node()),
             &State::Final(_) => None,
         }
     }
@@ -342,7 +260,6 @@ impl State {
         match self {
             &State::Atomic(_) => None,
             &State::Compound(ref c) => Some(c.substates.borrow()),
-            &State::Parallel(ref p) => Some(p.substates.borrow()),
             &State::Final(_) => None,
         }
     }
@@ -350,7 +267,6 @@ impl State {
         match self {
             &State::Atomic(_) => None,
             &State::Compound(ref c) => Some(c.substates.borrow_mut()),
-            &State::Parallel(ref p) => Some(p.substates.borrow_mut()),
             &State::Final(_) => None,
         }
     }
@@ -358,7 +274,6 @@ impl State {
         match self {
             &mut State::Atomic(ref mut a) => a.parent = parent,
             &mut State::Compound(ref mut c) => c.parent = parent,
-            &mut State::Parallel(ref mut p) => p.parent = parent,
             &mut State::Final(ref mut f) => f.parent = parent,
         }
     }
@@ -375,7 +290,6 @@ impl State {
                     return;
                 }
                 &mut State::Compound(ref mut c) => c.id = id.clone(),
-                &mut State::Parallel(ref mut p) => p.id = id.clone(),
             }
         }
         match st_ref.mut_substates() {
@@ -475,15 +389,10 @@ impl Context {
     pub fn set_var(&mut self, key: &str, value: Value) {
         self.vars.insert(key.to_string(), value);
     }
-    fn current_config(&self) -> Result<Rc<State>, Fault> {
-        match self.current_config.upgrade() {
-            Some(r) => Ok(r),
-            None => Err(Fault::CurrentStateUndefined),
-        }
-    }
     pub fn run(&mut self) -> Result<Value, Fault> {
         loop {
-            self.macrostep()?;
+            self.status = self.macrostep()?;
+            trace!("macrostep: status={:?}", self.status);
             match self.status {
                 Status::Done(ref o) => return Ok(o.clone()),
                 Status::Blocked => return Err(Fault::BlockedIndefinitely),
@@ -499,32 +408,86 @@ impl Context {
                     .build()
                     .unwrap();
                 return match self.microstep(&start_t) {
-                    Ok(new_status) => {
-                        self.status = new_status.clone();
-                        Ok(new_status)
-                    }
+                    Ok(status) => Ok(status),
                     Err(e) => Err(e),
                 };
             }
-            Status::Done(_) => Ok(self.status.clone()),
-            _ => {
-                let current = self.current_config()?;
-                trace!("macrostep: current={:?}", current);
-                if let State::Final(ref f) = *current {
-                    self.status = Status::Done(f.result.outputable().eval(self));
-                } else if let Some(ref next_t) =
-                    self.next_transition(current.active_node().unwrap().transitions()) {
-                    self.status = self.microstep(next_t)?;
-                } else if let Some(label) = current.node().initial() {
-                    self.status = self.microstep(&TransitionBuilder::default()
-                            .target_label(Some(label))
-                            .build()
-                            .unwrap())?;
-                } else {
-                    self.status = Status::Blocked
-                }
-                Ok(self.status.clone())
+            Status::Done(_) => return Ok(self.status.clone()),
+            _ => {}
+        }
+        let st = match self.current_config.upgrade() {
+            None => return Err(Fault::CurrentStateUndefined),
+            ref sst => sst.clone().unwrap(),
+        };
+        if let State::Final(ref f) = *st {
+            return Ok(Status::Done(f.result.outputable().eval(self)));
+        }
+        match self.eventless_transition(st.clone()) {
+            Ok(Some(status)) => return Ok(status),
+            Ok(None) => {}
+            Err(e) => return Err(e),
+        }
+        if let Some(ev) = self.events.pop() {
+            match self.event_transition(st.clone(), ev) {
+                Ok(Some(status)) => return Ok(status),
+                Ok(None) => {}
+                Err(e) => return Err(e),
             }
+        }
+        if let Some(label) = st.node().initial() {
+            return self.microstep(&TransitionBuilder::default()
+                .target_label(Some(label))
+                .build()
+                .unwrap());
+        }
+        Ok(Status::Blocked)
+    }
+    fn eventless_transition(&mut self, st: Rc<State>) -> Result<Option<Status>, Fault> {
+        let mut sst = Some(st);
+        loop {
+            sst = match sst {
+                Some(st) => {
+                    if let Some(n) = st.active_node() {
+                        for t in n.transitions() {
+                            if t.topics.is_empty() && t.cond.conditional().eval(self) {
+                                let status = self.microstep(t)?;
+                                return Ok(Some(status));
+                            }
+                        }
+                        match n.parent().upgrade() {
+                            None => None,
+                            p => p,
+                        }
+                    } else {
+                        None
+                    }
+                }
+                None => return Ok(None),
+            };
+        }
+    }
+    fn event_transition(&mut self, st: Rc<State>, ev: Event) -> Result<Option<Status>, Fault> {
+        let mut sst = Some(st);
+        loop {
+            sst = match sst {
+                Some(st) => {
+                    if let Some(n) = st.active_node() {
+                        for t in n.transitions() {
+                            if t.topics.contains(&ev.topic) && t.cond.conditional().eval(self) {
+                                let status = self.microstep(t)?;
+                                return Ok(Some(status));
+                            }
+                        }
+                        match n.parent().upgrade() {
+                            None => None,
+                            p => p,
+                        }
+                    } else {
+                        None
+                    }
+                }
+                None => return Ok(None),
+            };
         }
     }
     pub fn microstep(&mut self, t: &Transition) -> Result<Status, Fault> {
@@ -610,33 +573,6 @@ impl Context {
             result.push(id);
         }
         result
-    }
-    fn next_transition<'a>(&mut self, ts: &'a Vec<Transition>) -> Option<&'a Transition> {
-        for i in 0..ts.len() {
-            if ts[i].topics.is_empty() && ts[i].cond.conditional().eval(self) {
-                self.current_event = None;
-                trace!("matched empty topics, cond: {:?}", ts[i]);
-                return Some(&ts[i]);
-            }
-        }
-        trace!("events: {:?}, current_event: {:?}",
-               self.events,
-               self.current_event);
-        match self.events.pop() {
-            Some(ev) => {
-                for i in 0..ts.len() {
-                    trace!("checking {:?}", ts[i]);
-                    if ts[i].topics.contains(&ev.topic) && ts[i].cond.conditional().eval(self) {
-                        trace!("matched topic {:?}, cond: {:?}", &ev.topic, ts[i]);
-                        self.current_event = Some(ev);
-                        return Some(&ts[i]);
-                    }
-                    trace!("nope: topic was {:?} transition {:?}", &ev.topic, ts[i]);
-                }
-                None
-            }
-            None => None,
-        }
     }
 }
 
@@ -970,16 +906,6 @@ macro_rules! states {
         stb.label(stringify!($label));
         state_props!(stb {$($tail)*});
         State::Compound(stb.build().unwrap())
-    }}
-}
-
-#[macro_export]
-macro_rules! parallel {
-    ($label:ident {$($tail:tt)*}) => {{
-        let mut stb = ParallelBuilder::default();
-        stb.label(stringify!($label));
-        state_props!(stb {$($tail)*});
-        State::Parallel(stb.build().unwrap())
     }}
 }
 

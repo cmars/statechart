@@ -10,10 +10,13 @@ use statechart::*;
 fn pingpong() {
     let _ = env_logger::init();
     let sc = states!{ root {
-        transitions: [goto!(target: ping, actions: [
-                action_assign!(key: "i", value: Value::Int(0)),
-                action_raise!(topic: "ping", contents: Value::Int(1))])],
+        initial_label: Some("init".to_string()),
         substates: [
+            state!{ init {
+                on_entry: [
+                    action_assign!(key: "i", value: Value::Int(0)),
+                    action_raise!(topic: "ping", contents: Value::Int(1))],
+                transitions: [goto!(target: ping)]}},
             state!{ ping {
                 transitions: [
                     goto!(target: pong, topics: ["ping"],
