@@ -4,6 +4,7 @@ extern crate derive_builder;
 extern crate log;
 
 use std::cell::{RefCell, RefMut, Ref};
+use std::cmp::{max, Ordering};
 use std::collections::{HashMap, HashSet};
 use std::rc::{Rc, Weak};
 
@@ -182,6 +183,85 @@ impl Compound {
 }
 
 #[derive(Debug, Clone, Builder)]
+pub struct Parallel {
+    #[builder(default="vec![]")]
+    id: StateID,
+    #[builder(setter(into))]
+    label: StateLabel,
+    #[builder(default="vec![]")]
+    on_entry: Vec<Action>,
+    #[builder(default="vec![]")]
+    on_exit: Vec<Action>,
+    #[builder(default="vec![]")]
+    transitions: Vec<Transition>,
+    #[builder(default="RefCell::new(vec![])")]
+    substates: RefCell<Vec<Rc<State>>>,
+    #[builder(setter(skip))]
+    parent: Weak<State>,
+}
+
+impl PartialEq for Parallel {
+    fn eq(&self, other: &Self) -> bool {
+        (&self.id,
+         &self.label,
+         &self.on_entry,
+         &self.on_exit,
+         &self.transitions,
+         &self.substates) ==
+        (&other.id,
+         &other.label,
+         &other.on_entry,
+         &other.on_exit,
+         &other.transitions,
+         &other.substates)
+    }
+}
+
+impl Node for Parallel {
+    fn id(&self) -> &StateID {
+        &self.id
+    }
+    fn label(&self) -> &StateLabel {
+        &self.label
+    }
+    fn substate(&self, label: &str) -> Option<Rc<State>> {
+        let ss = self.substates.borrow();
+        for i in 0..ss.len() {
+            if ss[i].node().label() == label {
+                return Some(ss[i].clone());
+            }
+        }
+        None
+    }
+    fn initial(&self) -> Option<StateLabel> {
+        None
+    }
+    fn parent(&self) -> Weak<State> {
+        self.parent.clone()
+    }
+    fn on_entry(&self) -> &Vec<Action> {
+        &self.on_entry
+    }
+    fn on_exit(&self) -> &Vec<Action> {
+        &self.on_exit
+    }
+}
+impl ActiveNode for Parallel {
+    fn transitions(&self) -> &Vec<Transition> {
+        &self.transitions
+    }
+}
+
+impl Parallel {
+    pub fn node(&self) -> &Node {
+        self as &Node
+    }
+    pub fn active_node(&self) -> &ActiveNode {
+        self as &ActiveNode
+    }
+}
+
+#[derive(Debug, Clone, Builder)]
 pub struct Final {
     #[builder(default="vec![]")]
     id: StateID,
@@ -238,6 +318,7 @@ impl Final {
 pub enum State {
     Atomic(Atomic),
     Compound(Compound),
+    Parallel(Parallel),
     Final(Final),
 }
 
@@ -246,6 +327,7 @@ impl State {
         match self {
             &State::Atomic(ref a) => a.node(),
             &State::Compound(ref c) => c.node(),
+            &State::Parallel(ref p) => p.node(),
             &State::Final(ref f) => f.node(),
         }
     }
@@ -253,6 +335,7 @@ impl State {
         match self {
             &State::Atomic(ref a) => Some(a.active_node()),
             &State::Compound(ref c) => Some(c.active_node()),
+            &State::Parallel(ref p) => Some(p.active_node()),
             &State::Final(_) => None,
         }
     }
@@ -260,6 +343,7 @@ impl State {
         match self {
             &State::Atomic(_) => None,
             &State::Compound(ref c) => Some(c.substates.borrow()),
+            &State::Parallel(ref p) => Some(p.substates.borrow()),
             &State::Final(_) => None,
         }
     }
@@ -267,6 +351,7 @@ impl State {
         match self {
             &State::Atomic(_) => None,
             &State::Compound(ref c) => Some(c.substates.borrow_mut()),
+            &State::Parallel(ref p) => Some(p.substates.borrow_mut()),
             &State::Final(_) => None,
         }
     }
@@ -274,6 +359,7 @@ impl State {
         match self {
             &mut State::Atomic(ref mut a) => a.parent = parent,
             &mut State::Compound(ref mut c) => c.parent = parent,
+            &mut State::Parallel(ref mut p) => p.parent = parent,
             &mut State::Final(ref mut f) => f.parent = parent,
         }
     }
@@ -290,6 +376,7 @@ impl State {
                     return;
                 }
                 &mut State::Compound(ref mut c) => c.id = id.clone(),
+                &mut State::Parallel(ref mut p) => p.id = id.clone(),
             }
         }
         match st_ref.mut_substates() {
@@ -319,8 +406,10 @@ pub struct Context {
     state_by_label: HashMap<StateLabel, Weak<State>>,
 
     status: Status,
-    current_config: Weak<State>,
     current_event: Option<Event>,
+    current_config: Vec<Weak<State>>,
+    next_config: Vec<Weak<State>>,
+    exiting_parallels: HashSet<StateID>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -328,7 +417,34 @@ pub enum Status {
     New,
     Runnable,
     Blocked,
+    TerminatedParallel,
     Done(Value),
+}
+
+impl Ord for Status {
+    fn cmp(&self, other: &Status) -> Ordering {
+        self.to_i32().cmp(&other.to_i32())
+    }
+}
+
+impl PartialOrd for Status {
+    fn partial_cmp(&self, other: &Status) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Eq for Status {}
+
+impl Status {
+    fn to_i32(&self) -> i32 {
+        match self {
+            &Status::New => 1,
+            &Status::Runnable => 2,
+            &Status::Blocked => 0,
+            &Status::TerminatedParallel => -1,
+            &Status::Done(_) => 3,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -353,8 +469,10 @@ impl Context {
             state_by_id: HashMap::new(),
             state_by_label: HashMap::new(),
             status: Status::New,
-            current_config: Weak::new(),
             current_event: None,
+            current_config: vec![],
+            next_config: vec![],
+            exiting_parallels: HashSet::new(),
         };
         ctx.index(root_ref);
         ctx
@@ -407,40 +525,71 @@ impl Context {
                     .target_label(Some(self.root.node().label().clone()))
                     .build()
                     .unwrap();
-                return match self.microstep(&start_t) {
-                    Ok(status) => Ok(status),
+                let start_st = self.root.clone();
+                return match self.microstep(start_st, &start_t) {
+                    Ok(status) => {
+                        self.complete_macrostep();
+                        Ok(status)
+                    }
                     Err(e) => Err(e),
                 };
             }
             Status::Done(_) => return Ok(self.status.clone()),
             _ => {}
         }
-        let st = match self.current_config.upgrade() {
-            None => return Err(Fault::CurrentStateUndefined),
-            ref sst => sst.clone().unwrap(),
-        };
-        if let State::Final(ref f) = *st {
-            return Ok(Status::Done(f.result.outputable().eval(self)));
-        }
-        match self.eventless_transition(st.clone()) {
-            Ok(Some(status)) => return Ok(status),
-            Ok(None) => {}
-            Err(e) => return Err(e),
-        }
-        if let Some(ev) = self.events.pop() {
-            match self.event_transition(st.clone(), ev) {
-                Ok(Some(status)) => return Ok(status),
+        let mut result = Status::Blocked;
+        for i in 0..self.current_config.len() {
+            let st = match self.current_config[i].upgrade() {
+                None => return Err(Fault::CurrentStateUndefined),
+                ref sst => sst.clone().unwrap(),
+            };
+            if let State::Final(ref f) = *st {
+                result = max(result, Status::Done(f.result.outputable().eval(self)));
+                continue;
+            }
+            match self.eventless_transition(st.clone()) {
+                Ok(Some(status)) => {
+                    result = max(result, status);
+                    continue;
+                }
                 Ok(None) => {}
                 Err(e) => return Err(e),
             }
+            if let Some(ev) = self.events.pop() {
+                match self.event_transition(st.clone(), ev) {
+                    Ok(Some(status)) => {
+                        result = max(result, status);
+                        continue;
+                    }
+                    Ok(None) => {}
+                    Err(e) => return Err(e),
+                }
+            }
+            if let Some(label) = st.node().initial() {
+                let status = self.microstep(st,
+                               &TransitionBuilder::default()
+                                   .target_label(Some(label))
+                                   .build()
+                                   .unwrap())?;
+                result = max(result, status);
+            } else if let State::Parallel(ref p) = *st {
+                for sub_st in p.substates.borrow().iter() {
+                    let status = self.microstep(sub_st.clone(),
+                                   &TransitionBuilder::default()
+                                       .target_label(Some(sub_st.node().label().to_string()))
+                                       .build()
+                                       .unwrap())?;
+                    result = max(result, status);
+                }
+            }
         }
-        if let Some(label) = st.node().initial() {
-            return self.microstep(&TransitionBuilder::default()
-                .target_label(Some(label))
-                .build()
-                .unwrap());
-        }
-        Ok(Status::Blocked)
+        self.complete_macrostep();
+        Ok(result)
+    }
+    fn complete_macrostep(&mut self) {
+        self.current_config.clear();
+        self.current_config.append(&mut self.next_config);
+        self.exiting_parallels.clear();
     }
     fn eventless_transition(&mut self, st: Rc<State>) -> Result<Option<Status>, Fault> {
         let mut sst = Some(st);
@@ -450,7 +599,7 @@ impl Context {
                     if let Some(n) = st.active_node() {
                         for t in n.transitions() {
                             if t.topics.is_empty() && t.cond.conditional().eval(self) {
-                                let status = self.microstep(t)?;
+                                let status = self.microstep(st.clone(), t)?;
                                 return Ok(Some(status));
                             }
                         }
@@ -474,7 +623,7 @@ impl Context {
                     if let Some(n) = st.active_node() {
                         for t in n.transitions() {
                             if t.topics.contains(&ev.topic) && t.cond.conditional().eval(self) {
-                                let status = self.microstep(t)?;
+                                let status = self.microstep(st.clone(), t)?;
                                 return Ok(Some(status));
                             }
                         }
@@ -490,7 +639,7 @@ impl Context {
             };
         }
     }
-    pub fn microstep(&mut self, t: &Transition) -> Result<Status, Fault> {
+    pub fn microstep(&mut self, current_st: Rc<State>, t: &Transition) -> Result<Status, Fault> {
         trace!("microstep: {:?}", t);
         match t.target_label {
             None => {
@@ -505,10 +654,7 @@ impl Context {
                     Some(r) => r,
                     None => return Err(Fault::LabelNotFound(target_label.clone())),
                 };
-                let current_id = match self.current_config.upgrade() {
-                    Some(ref st) => st.node().id().clone(),
-                    None => vec![],
-                };
+                let current_id = current_st.node().id().clone();
                 // Execute on_exit for all states we are leaving in this transition.
                 let exit_states = Context::exit_states(&current_id, target_st.node().id());
                 for id in exit_states {
@@ -516,6 +662,15 @@ impl Context {
                         Some(st) => st,
                         None => return Err(Fault::IDNotFound(id.clone())),
                     };
+                    if let State::Parallel(_) = *exit_state {
+                        if self.exiting_parallels.contains(&id) {
+                            // If we've already exited this parallel (in a prior parallel
+                            // microstep), we're done.
+                            return Ok(Status::TerminatedParallel);
+                        } else {
+                            self.exiting_parallels.insert(id.clone());
+                        }
+                    }
                     for on_exit in exit_state.node().on_exit() {
                         on_exit.actionable().apply(self)?;
                     }
@@ -535,7 +690,7 @@ impl Context {
                         on_entry.actionable().apply(self)?;
                     }
                 }
-                self.current_config = Rc::downgrade(&target_st);
+                self.next_config.push(Rc::downgrade(&target_st));
                 Ok(Status::Runnable)
             }
         }
@@ -906,6 +1061,16 @@ macro_rules! states {
         stb.label(stringify!($label));
         state_props!(stb {$($tail)*});
         State::Compound(stb.build().unwrap())
+    }}
+}
+
+#[macro_export]
+macro_rules! parallel {
+    ($label:ident {$($tail:tt)*}) => {{
+        let mut stb = ParallelBuilder::default();
+        stb.label(stringify!($label));
+        state_props!(stb {$($tail)*});
+        State::Parallel(stb.build().unwrap())
     }}
 }
 
