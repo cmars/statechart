@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+extern crate env_logger;
 extern crate statechart;
 use statechart::*;
 
@@ -49,7 +50,24 @@ fn context() {
     assert_eq!(result.unwrap(), Value::Object(HashMap::new()));
 }
 
+#[test]
+fn parallel() {
+    let mut ctx = Context::new(phello());
+    let result = ctx.run();
+    assert!(result.is_ok(), "{:?}", result.err().unwrap());
+    assert_eq!(result.unwrap(), Value::Object(HashMap::new()));
+}
+
+#[test]
+fn parallel_final() {
+    let mut ctx = Context::new(phellofinal());
+    let result = ctx.run();
+    assert!(result.is_ok(), "{:?}", result.err().unwrap());
+    assert_eq!(result.unwrap(), Value::Object(HashMap::new()));
+}
+
 fn c123() -> State {
+    let _ = env_logger::init();
     states!{ S {
         substates: [
             state!{ S1 {
@@ -64,5 +82,51 @@ fn c123() -> State {
                 on_entry: [action_log!(message: "hello s3")],
                 on_exit: [action_log!(message: "and goodbye now")],
             }},
+        ]}}
+}
+
+fn phello() -> State {
+    let _ = env_logger::init();
+    states!{ S {
+        substates: [
+            parallel!{ P  {
+                substates: [
+                    state!{ S1 {
+                        transitions: [goto!(target: SF)],
+                        on_entry: [action_log!(message: "hello s1")],
+                    }},
+                    state!{ S2 {
+                        on_entry: [action_log!(message: "hello s2")],
+                    }},
+                    state!{ S3 {
+                        on_entry: [action_log!(message: "hello s3")],
+                    }},
+                ]}},
+            final_state!{ SF {
+                on_exit: [action_log!(message: "goodbye now")],
+            }},
+        ]}}
+}
+
+fn phellofinal() -> State {
+    let _ = env_logger::init();
+    states!{ S {
+        substates: [
+            parallel!{ P  {
+                substates: [
+                    state!{ S1 {
+                        on_entry: [action_log!(message: "hello s1")],
+                    }},
+                    state!{ S2 {
+                        on_entry: [action_log!(message: "hello s2")],
+                    }},
+                    state!{ S3 {
+                        on_entry: [action_log!(message: "hello s3")],
+                    }},
+                    final_state!{ SF {
+                        on_entry: [action_log!(message: "hello sf")],
+                        on_exit: [action_log!(message: "goodbye now")],
+                    }},
+            ]}},
         ]}}
 }

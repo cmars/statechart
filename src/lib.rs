@@ -509,8 +509,9 @@ impl Context {
     }
     pub fn run(&mut self) -> Result<Value, Fault> {
         loop {
+            trace!("BEGIN macrostep");
             self.status = self.macrostep()?;
-            trace!("macrostep: status={:?}", self.status);
+            trace!("END macrostep: status={:?}", self.status);
             match self.status {
                 Status::Done(ref o) => return Ok(o.clone()),
                 Status::Blocked => return Err(Fault::BlockedIndefinitely),
@@ -544,6 +545,9 @@ impl Context {
                 ref sst => sst.clone().unwrap(),
             };
             if let State::Final(ref f) = *st {
+                for on_exit in f.on_exit() {
+                    on_exit.actionable().apply(self)?;
+                }
                 result = max(result, Status::Done(f.result.outputable().eval(self)));
                 continue;
             }
@@ -574,7 +578,7 @@ impl Context {
                 result = max(result, status);
             } else if let State::Parallel(ref p) = *st {
                 for sub_st in p.substates.borrow().iter() {
-                    let status = self.microstep(sub_st.clone(),
+                    let status = self.microstep(st.clone(),
                                    &TransitionBuilder::default()
                                        .target_label(Some(sub_st.node().label().to_string()))
                                        .build()
@@ -752,10 +756,10 @@ macro_rules! action_log {
 
 impl Actionable for Log {
     fn apply(&self, _: &mut Context) -> Result<(), Fault> {
-        trace!("[{}]{}: {}",
-               chrono::prelude::Utc::now().format("%Y-%m-%d %H:%M:%S"),
-               self.label,
-               self.message);
+        info!("[{}]{}: {}",
+              chrono::prelude::Utc::now().format("%Y-%m-%d %H:%M:%S"),
+              self.label,
+              self.message);
         Ok(())
     }
 }
