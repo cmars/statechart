@@ -66,6 +66,15 @@ fn parallel_final() {
     assert_eq!(result.unwrap(), Value::Object(HashMap::new()));
 }
 
+#[test]
+fn parallel_swap() {
+    let mut ctx = Context::new(pswap());
+    for _ in 0..100 {
+        let result = ctx.step();
+        assert_eq!(result, Ok(Status::Runnable));
+    }
+}
+
 fn c123() -> State {
     let _ = env_logger::init();
     states!{ S {
@@ -129,4 +138,22 @@ fn phellofinal() -> State {
                     }},
             ]}},
         ]}}
+}
+
+fn pswap() -> State {
+    let _ = env_logger::init();
+    states!{ S {
+        substates: [
+            parallel!{ P {
+                substates: [
+                    state!{ S1 {
+                        on_entry: [action_log!(message: "s1 wants to be an s2")],
+                        transitions: [goto!(target: S2)],
+                    }},
+                    state!{ S2 {
+                        on_entry: [action_log!(message: "s2 wants to be an s1")],
+                        transitions: [goto!(target: S1)],
+                    }},
+                ]}},
+            ]}}
 }

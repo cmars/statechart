@@ -519,7 +519,13 @@ impl Context {
             }
         }
     }
-    pub fn macrostep(&mut self) -> Result<Status, Fault> {
+    pub fn step(&mut self) -> Result<Status, Fault> {
+        trace!("BEGIN macrostep");
+        self.status = self.macrostep()?;
+        trace!("END macrostep: status={:?}", self.status);
+        Ok(self.status.clone())
+    }
+    fn macrostep(&mut self) -> Result<Status, Fault> {
         match self.status {
             Status::New => {
                 let start_t = TransitionBuilder::default()
@@ -643,7 +649,7 @@ impl Context {
             };
         }
     }
-    pub fn microstep(&mut self, current_st: Rc<State>, t: &Transition) -> Result<Status, Fault> {
+    fn microstep(&mut self, current_st: Rc<State>, t: &Transition) -> Result<Status, Fault> {
         trace!("microstep: {:?}", t);
         match t.target_label {
             None => {

@@ -17,7 +17,7 @@ impl Stream for Agent {
     type Error = Fault;
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
         loop {
-            let status = self.ctx.macrostep()?;
+            let status = self.ctx.step()?;
             match &status {
                 &Status::Done(_) => {
                     if !self.eos {
