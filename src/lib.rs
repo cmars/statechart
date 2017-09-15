@@ -544,7 +544,10 @@ impl Context {
             Status::Done(_) => return Ok(self.status.clone()),
             _ => {}
         }
-        let mut result = Status::Blocked;
+
+        let mut results = vec![];
+
+        // First follow all eventless transitions that can be taken
         for i in 0..self.current_config.len() {
             let st = match self.current_config[i].upgrade() {
                 None => return Err(Fault::CurrentStateUndefined),
@@ -554,34 +557,58 @@ impl Context {
                 for on_exit in f.on_exit() {
                     on_exit.actionable().apply(self)?;
                 }
-                result = max(result, Status::Done(f.result.outputable().eval(self)));
+                results.push(Status::Done(f.result.outputable().eval(self)));
                 continue;
             }
             match self.eventless_transition(st.clone()) {
                 Ok(Some(status)) => {
-                    result = max(result, status);
+                    results.push(status);
                     continue;
                 }
                 Ok(None) => {}
                 Err(e) => return Err(e),
             }
-            if let Some(ev) = self.events.pop() {
+        }
+        if !results.is_empty() {
+            self.complete_macrostep();
+            return Ok(results.into_iter().fold(Status::Blocked, |agg, val| max(agg, val)));
+        }
+
+        // Then follow transitions matched by the next event in the queue.
+        if let Some(ref ev) = self.events.pop() {
+            for i in 0..self.current_config.len() {
+                let st = match self.current_config[i].upgrade() {
+                    None => return Err(Fault::CurrentStateUndefined),
+                    ref sst => sst.clone().unwrap(),
+                };
                 match self.event_transition(st.clone(), ev) {
                     Ok(Some(status)) => {
-                        result = max(result, status);
+                        results.push(status);
                         continue;
                     }
                     Ok(None) => {}
                     Err(e) => return Err(e),
                 }
             }
+        }
+        if !results.is_empty() {
+            self.complete_macrostep();
+            return Ok(results.into_iter().fold(Status::Blocked, |agg, val| max(agg, val)));
+        }
+
+        // Finally, enter any non-atomic states in the current configuration.
+        for i in 0..self.current_config.len() {
+            let st = match self.current_config[i].upgrade() {
+                None => return Err(Fault::CurrentStateUndefined),
+                ref sst => sst.clone().unwrap(),
+            };
             if let Some(label) = st.node().initial() {
                 let status = self.microstep(st,
                                &TransitionBuilder::default()
                                    .target_label(Some(label))
                                    .build()
                                    .unwrap())?;
-                result = max(result, status);
+                results.push(status);
             } else if let State::Parallel(ref p) = *st {
                 for sub_st in p.substates.borrow().iter() {
                     let status = self.microstep(st.clone(),
@@ -589,12 +616,12 @@ impl Context {
                                        .target_label(Some(sub_st.node().label().to_string()))
                                        .build()
                                        .unwrap())?;
-                    result = max(result, status);
+                    results.push(status);
                 }
             }
         }
         self.complete_macrostep();
-        Ok(result)
+        Ok(results.into_iter().fold(Status::Blocked, |agg, val| max(agg, val)))
     }
     fn complete_macrostep(&mut self) {
         self.current_config.clear();
@@ -625,7 +652,7 @@ impl Context {
             };
         }
     }
-    fn event_transition(&mut self, st: Rc<State>, ev: Event) -> Result<Option<Status>, Fault> {
+    fn event_transition(&mut self, st: Rc<State>, ev: &Event) -> Result<Option<Status>, Fault> {
         let mut sst = Some(st);
         loop {
             sst = match sst {
