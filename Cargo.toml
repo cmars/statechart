@@ -2,7 +2,7 @@
 name = "statechart"
 description = "statecharts: hierarchical, reactive state machines"
 license = "MIT"
-version = "0.0.7"
+version = "0.0.8"
 documentation = "https://docs.rs/statechart"
 repository = "https://github.com/cmars/statechart"
 authors = ["Casey Marshall <github@cmars.tech>"]
