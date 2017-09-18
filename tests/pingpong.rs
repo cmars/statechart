@@ -20,25 +20,25 @@ fn pingpong() {
             state!{ ping {
                 transitions: [
                     goto!(target: pong, topics: ["ping"],
-                        cond: cond_fn!(|ctx: &Context| {
-                            match ctx.get_var("i") {
+                        cond: cond_fn!(|it: &Interpreter| {
+                            match it.get_var("i") {
                                 Some(&Value::Int(i)) => i < 10,
                                 _ => false,
                             }}),
                         actions: [
                             action_raise!(topic: "pong"),
-                            action_fn!(Rc::new(|ctx: &mut Context| {
-                                let i = match ctx.get_var("i") {
+                            action_fn!(Rc::new(|it: &mut Interpreter| {
+                                let i = match it.get_var("i") {
                                     Some(&Value::Int(i)) => i,
                                     _ => return Err(Fault::ActionError(
                                         "i: invalid or uninitialized value".to_string())),
                                 };
-                                ctx.set_var("i", Value::Int(i+1));
+                                it.set_var("i", Value::Int(i+1));
                                 Ok(())
                             }))]),
                     goto!(target: end,
-                        cond: cond_fn!(|ctx: &Context| {
-                            match ctx.get_var("i") {
+                        cond: cond_fn!(|it: &Interpreter| {
+                            match it.get_var("i") {
                                 Some(&Value::Int(i)) => i >= 10,
                                 _ => false,
                             }
@@ -55,8 +55,9 @@ fn pingpong() {
                 result: Output::ValueOf(ValueOfBuilder::default().key("i").build().unwrap()),
             }},
         ]}};
-    let mut ctx = Context::new(sc);
-    let result = ctx.run();
+    let ctx = Context::new(sc);
+    let mut it = Interpreter::new();
+    let result = it.run(&ctx);
     assert!(result.is_ok(), "fault: {:?}", result.err().unwrap());
     assert_eq!(result.unwrap(), Value::Int(10));
 }

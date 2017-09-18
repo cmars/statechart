@@ -6,8 +6,8 @@ extern crate statechart;
 use statechart::*;
 
 fn a_eq_x(x: i32) -> Condition {
-    cond_fn!(move |ctx: &Context| -> bool {
-        match ctx.get_var("a") {
+    cond_fn!(move |it: &Interpreter| -> bool {
+        match it.get_var("a") {
             Some(&Value::Int(n)) => n == x,
             _ => false,
         }
@@ -29,8 +29,9 @@ fn first_choice_only_match() {
                 result: Output::ValueOf(ValueOfBuilder::default().key("b").build().unwrap()),
             }},
         ]}};
-    let mut ctx = Context::new(sc);
-    let result = ctx.run();
+    let ctx = Context::new(sc);
+    let mut it = Interpreter::new();
+    let result = it.run(&ctx);
     assert!(result.is_ok(), "fault: {:?}", result.err().unwrap());
     assert_eq!(result.unwrap(), Value::from_str("matched"));
 }
@@ -52,8 +53,9 @@ fn last_match() {
                 result: Output::ValueOf(ValueOfBuilder::default().key("b").build().unwrap()),
             }},
         ]}};
-    let mut ctx = Context::new(sc);
-    let result = ctx.run();
+    let ctx = Context::new(sc);
+    let mut it = Interpreter::new();
+    let result = it.run(&ctx);
     assert!(result.is_ok(), "fault: {:?}", result.err().unwrap());
     assert_eq!(result.unwrap(), Value::from_str("matched"));
 }
@@ -75,8 +77,9 @@ fn otherwise() {
                 result: Output::ValueOf(ValueOfBuilder::default().key("b").build().unwrap()),
             }},
         ]}};
-    let mut ctx = Context::new(sc);
-    let result = ctx.run();
+    let ctx = Context::new(sc);
+    let mut it = Interpreter::new();
+    let result = it.run(&ctx);
     assert!(result.is_ok(), "fault: {:?}", result.err().unwrap());
     assert_eq!(result.unwrap(), Value::from_str("matched"));
 }

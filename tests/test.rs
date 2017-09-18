@@ -9,8 +9,9 @@ use statechart::*;
 #[test]
 fn blocked_indefinitely() {
     let st = state!{ S {} };
-    let mut ctx = Context::new(st);
-    let result = ctx.run();
+    let ctx = Context::new(st);
+    let mut it = Interpreter::new();
+    let result = it.run(&ctx);
     assert_eq!(result, Err(Fault::BlockedIndefinitely));
 }
 
@@ -18,11 +19,14 @@ fn blocked_indefinitely() {
 fn transitions() {
     let ctx = Context::new(c123());
     let st = ctx.root();
-    assert_eq!(st.node().id(), &vec![0]);
-    assert_eq!(st.node().substate("S1").unwrap().node().id(), &vec![0, 0]);
-    assert_eq!(st.node().substate("S2").unwrap().node().id(), &vec![0, 1]);
-    assert_eq!(st.node().substate("S3").unwrap().node().id(), &vec![0, 2]);
+    assert_eq!(st.node().id(), &vec![]);
+    assert_eq!(st.node().substate("S1").unwrap().node().id(), &vec![0]);
+    assert_eq!(st.node().substate("S2").unwrap().node().id(), &vec![1]);
+    assert_eq!(st.node().substate("S3").unwrap().node().id(), &vec![2]);
     assert_eq!(st.node().substate("nonesuch"), None);
+    assert_eq!(ctx.state_by_id(&vec![0]).unwrap().node().id(), &vec![0]);
+    assert_eq!(ctx.state_by_id(&vec![1]).unwrap().node().id(), &vec![1]);
+    assert_eq!(ctx.state_by_id(&vec![2]).unwrap().node().id(), &vec![2]);
 }
 
 #[test]
@@ -38,39 +42,43 @@ fn goto() {
 
 #[test]
 fn context() {
-    let mut ctx = Context::new(c123());
+    let ctx = Context::new(c123());
     assert_eq!(ctx.state("S1").unwrap().node().label(), "S1");
     for ss in vec!["S1", "S2", "S3"] {
-        assert_eq!(ctx.state(ss).unwrap().node().parent().upgrade().unwrap().node().label(),
+        assert_eq!(ctx.state_by_id(ctx.state(ss).unwrap().node().parent().unwrap()).unwrap().node().label(),
                    "S");
     }
-    assert_eq!(ctx.state("S").unwrap().node().parent().upgrade(), None);
-    let result = ctx.run();
+    assert_eq!(ctx.state("S").unwrap().node().parent(), None);
+    let mut it = Interpreter::new();
+    let result = it.run(&ctx);
     assert!(result.is_ok(), "{:?}", result.err().unwrap());
     assert_eq!(result.unwrap(), Value::Object(HashMap::new()));
 }
 
 #[test]
 fn parallel() {
-    let mut ctx = Context::new(phello());
-    let result = ctx.run();
+    let ctx = Context::new(phello());
+    let mut it = Interpreter::new();
+    let result = it.run(&ctx);
     assert!(result.is_ok(), "{:?}", result.err().unwrap());
     assert_eq!(result.unwrap(), Value::Object(HashMap::new()));
 }
 
 #[test]
 fn parallel_final() {
-    let mut ctx = Context::new(phellofinal());
-    let result = ctx.run();
+    let ctx = Context::new(phellofinal());
+    let mut it = Interpreter::new();
+    let result = it.run(&ctx);
     assert!(result.is_ok(), "{:?}", result.err().unwrap());
     assert_eq!(result.unwrap(), Value::Object(HashMap::new()));
 }
 
 #[test]
 fn parallel_swap() {
-    let mut ctx = Context::new(pswap());
+    let ctx = Context::new(pswap());
+    let mut it = Interpreter::new();
     for _ in 0..100 {
-        let result = ctx.step();
+        let result = it.step(&ctx);
         assert_eq!(result, Ok(Status::Runnable));
     }
 }

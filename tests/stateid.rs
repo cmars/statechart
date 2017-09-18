@@ -7,23 +7,23 @@ use statechart::*;
 fn common_ancestor() {
     let l = vec![0, 1, 1, 3, 4];
     let r = vec![0, 1, 2, 3, 1];
-    let a = Context::common_ancestor(&l, &r);
+    let a = Interpreter::common_ancestor(&l, &r);
     assert_eq!(a, vec![0, 1]);
-    let a = Context::common_ancestor(&r, &l);
+    let a = Interpreter::common_ancestor(&r, &l);
     assert_eq!(a, vec![0, 1]);
 
     let l = vec![0, 1, 1];
     let r = vec![0, 1, 1, 2, 0];
-    let a = Context::common_ancestor(&l, &r);
+    let a = Interpreter::common_ancestor(&l, &r);
     assert_eq!(a, vec![0, 1, 1]);
-    let a = Context::common_ancestor(&r, &l);
+    let a = Interpreter::common_ancestor(&r, &l);
     assert_eq!(a, vec![0, 1, 1]);
 
     let l = vec![];
     let r = vec![0, 1];
-    let a = Context::common_ancestor(&l, &r);
+    let a = Interpreter::common_ancestor(&l, &r);
     assert_eq!(a, vec![]);
-    let a = Context::common_ancestor(&r, &l);
+    let a = Interpreter::common_ancestor(&r, &l);
     assert_eq!(a, vec![]);
 }
 
@@ -31,9 +31,9 @@ fn common_ancestor() {
 fn exit_states() {
     let l = vec![0, 1, 1, 3, 4];
     let r = vec![0, 1, 1];
-    let exits = Context::exit_states(&l, &r);
+    let exits = Interpreter::exit_states(&l, &r);
     assert_eq!(exits, vec![vec![0, 1, 1, 3, 4], vec![0, 1, 1, 3]]);
-    let exits = Context::exit_states(&r, &l);
+    let exits = Interpreter::exit_states(&r, &l);
     assert!(exits.is_empty());
 }
 
@@ -41,8 +41,8 @@ fn exit_states() {
 fn entry_states() {
     let l = vec![0, 1, 1];
     let r = vec![0, 1, 1, 3, 4];
-    let entries = Context::entry_states(&l, &r);
+    let entries = Interpreter::entry_states(&l, &r);
     assert_eq!(entries, vec![vec![0, 1, 1, 3], vec![0, 1, 1, 3, 4]]);
-    let entries = Context::entry_states(&r, &l);
+    let entries = Interpreter::entry_states(&r, &l);
     assert!(entries.is_empty());
 }

@@ -5,19 +5,20 @@ use self::futures::sync::mpsc;
 
 use super::*;
 
-pub struct Agent {
+pub struct Agent<'a> {
     pub sender: mpsc::Sender<Event>,
     receiver: mpsc::Receiver<Event>,
-    ctx: Context,
+    ctx: &'a Context,
+    it: Interpreter,
     eos: bool,
 }
 
-impl Stream for Agent {
+impl<'a> Stream for Agent<'a> {
     type Item = Status;
     type Error = Fault;
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
         loop {
-            let status = self.ctx.step()?;
+            let status = self.it.step(self.ctx)?;
             match &status {
                 &Status::Done(_) => {
                     if !self.eos {
@@ -30,7 +31,7 @@ impl Stream for Agent {
                 &Status::Blocked => {
                     match self.receiver.poll() {
                         Ok(Async::Ready(Some(event))) => {
-                            self.ctx.events.push(event);
+                            self.it.events.push(event);
                             continue;
                         }
                         Ok(Async::Ready(None)) => return Err(Fault::BlockedIndefinitely),
@@ -44,13 +45,14 @@ impl Stream for Agent {
     }
 }
 
-impl Agent {
-    pub fn new(ctx: Context) -> Agent {
+impl<'a> Agent<'a> {
+    pub fn new(ctx: &'a Context, it: Interpreter) -> Agent {
         let (sender, receiver) = mpsc::channel(0);
         Agent {
             sender: sender,
             receiver: receiver,
             ctx: ctx,
+            it: it,
             eos: false,
         }
     }

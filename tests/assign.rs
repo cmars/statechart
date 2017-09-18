@@ -17,8 +17,9 @@ fn assign_string() {
                 result: Output::ValueOf(ValueOfBuilder::default().key("hello").build().unwrap()),
             }},
         ]}};
-    let mut ctx = Context::new(sc);
-    let result = ctx.run();
+    let ctx = Context::new(sc);
+    let mut it = Interpreter::new();
+    let result = it.run(&ctx);
     assert!(result.is_ok(), "fault: {:?}", result.err().unwrap());
     assert_eq!(result.unwrap(), Value::from_str("assign"));
 }
