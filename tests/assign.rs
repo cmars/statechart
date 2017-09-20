@@ -1,8 +1,12 @@
 #[cfg(test)]
 
 extern crate env_logger;
+
+#[macro_use]
 extern crate statechart;
-use statechart::*;
+
+use statechart::ast::*;
+use statechart::interpreter::*;
 
 #[test]
 fn assign_string() {

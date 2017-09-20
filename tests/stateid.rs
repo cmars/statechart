@@ -1,7 +1,8 @@
 #[cfg(test)]
 
 extern crate statechart;
-use statechart::*;
+
+use statechart::interpreter::Interpreter;
 
 #[test]
 fn common_ancestor() {

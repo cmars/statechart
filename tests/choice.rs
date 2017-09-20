@@ -1,9 +1,11 @@
 #[cfg(test)]
+#[macro_use]
+extern crate statechart;
 
 use std::rc::Rc;
 
-extern crate statechart;
-use statechart::*;
+use statechart::ast::*;
+use statechart::interpreter::*;
 
 fn a_eq_x(x: i32) -> Condition {
     cond_fn!(move |it: &Interpreter| -> bool {

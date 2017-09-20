@@ -1,10 +1,14 @@
 #[cfg(test)]
 
+extern crate env_logger;
+
+#[macro_use]
+extern crate statechart;
+
 use std::rc::Rc;
 
-extern crate env_logger;
-extern crate statechart;
-use statechart::*;
+use statechart::ast::*;
+use statechart::interpreter::*;
 
 #[test]
 fn pingpong() {

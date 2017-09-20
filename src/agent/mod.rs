@@ -1,9 +1,9 @@
-extern crate futures;
-use self::futures::{Async, Poll};
-use self::futures::stream::Stream;
-use self::futures::sync::mpsc;
+use futures::{Async, Poll};
+use futures::stream::Stream;
+use futures::sync::mpsc;
 
-use super::*;
+use ast::Context;
+use interpreter::{Event, Fault, Interpreter, Status};
 
 pub struct Agent<'a> {
     pub sender: mpsc::Sender<Event>,
@@ -31,7 +31,7 @@ impl<'a> Stream for Agent<'a> {
                 &Status::Blocked => {
                     match self.receiver.poll() {
                         Ok(Async::Ready(Some(event))) => {
-                            self.it.events.push(event);
+                            self.it.push_event(event);
                             continue;
                         }
                         Ok(Async::Ready(None)) => return Err(Fault::BlockedIndefinitely),
